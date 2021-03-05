@@ -1,0 +1,16 @@
+{
+	"redirs":{},
+	"accounts":{
+		"admin":{
+			"passHash":"",
+			"allow":[],
+			"deny":[],
+			"canUpload":false
+		}
+	},
+	"viewSettings":{
+		"folder":{
+			"imageMode":"thumbnail"
+		}
+	}
+}

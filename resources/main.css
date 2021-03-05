@@ -1,0 +1,27 @@
+body{
+	font-family:Consolas, Courier New;
+	font-size:18px;
+}
+input{
+	font-size:18px;
+	box-sizing:border-box;
+	width:25%;
+}
+table{
+	width:100%;
+}
+a{
+	display:inline-block;
+	width:100%;
+	text-decoration:none;
+}
+a:hover{text-decoration:underline;}
+img, video{
+	max-width:95%;
+	max-height:95vh;
+}
+@media(max-width:600px){
+	input{
+		width:100%;
+	}
+}

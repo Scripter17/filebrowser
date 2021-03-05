@@ -1,0 +1,32 @@
+doctype html
+head
+	meta(name="viewport" content="width=device-width, initial-scale=1.0")
+	link(href="/main.css" rel="stylesheet")
+	title=loc
+body
+	if username!=""
+		="Currently logged in as: "+username
+	else
+		="Currently not logged in"
+		form(action="/login" method="POST")
+			input(type="text" name="username" placeholder="username" autocomplete="new-password")
+			br
+			input(type="password" name="password" placeholder="password" autocomplete="new-password")
+			br
+			input(type="submit" value="Login")
+	br
+	=loc
+	br
+	a(href="..")=".."
+	hr
+	for folder in folders
+		a(href=folder)=folder
+		br
+	for file in files
+		if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.imageMode || "link")!="link"
+			a(href=file): img(src=(viewSettings.imageMode=="thumbnail"?"/thumb/":"")+loc+file.replace(/^.\//, "") alt=file)
+		else if /\.(mp4|mov|webm)$/.test(file) && (viewSettings.videoMode || "link")!="link"
+			if viewSettings.videoMode=="embed"
+				video(controls): source(src=file)
+		else
+			a(href=file)=file

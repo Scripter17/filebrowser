@@ -1,0 +1,11 @@
+doctype html
+head
+	meta(name="viewport" content="width=device-width, initial-scale=1.0")
+	link(href="/main.css" rel="stylesheet")
+	title="File upload"
+body
+	="Currently logged in as: "+username
+	form(action="/upload" method="post" enctype="multipart/form-data")
+		input(type="file" name="file")
+		br
+		input(type="submit" value="Upload file")

@@ -1,0 +1,24 @@
+doctype html
+head
+	meta(name="viewport" content="width=device-width, initial-scale=1.0")
+	link(href="/main.css" rel="stylesheet")
+	title=title
+body
+	if username!=""
+		="Currently logged in as: "+username
+		form(action="/login" method="POST")
+			input(type="submit" value="Logout")
+	else
+		="Currently not logged in"
+		form(action="/login" method="POST")
+			input(type="text" name="username" placeholder="username" autocomplete="new-password")
+			br
+			input(type="password" name="password" placeholder="password" autocomplete="new-password")
+			br
+			input(type="submit" value="Login")
+	hr
+	if username=="admin"
+		a(href="/uploadForm")="Upload file"
+	for drive in drives
+		a(href="./"+drive)=drive
+		br
