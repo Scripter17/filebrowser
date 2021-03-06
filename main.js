@@ -8,14 +8,15 @@ path=require("path");
 fs=require("fs");
 crypto=require("crypto");
 childProcess=require("child_process");
+
 // Initialize stuff
 parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
 	add_help:true
 });
-parser.add_argument("-config", "-c", {help:"Set config file", metavar:"config", default:"config.json"})
-parser.add_argument("-hash", {help:"Calculate account password hash", metavar:"password"})
-parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad idea)", action:"store_true"})
+parser.add_argument("-config", "-c", {help:"Set config file", metavar:"config", default:"config.json"});
+parser.add_argument("-hash", {help:"Calculate account password hash", metavar:"password"});
+parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad idea)", action:"store_true"});
 kwargs=parser.parse_args();
 
 config=getConfig();
@@ -44,7 +45,7 @@ server.get("/", function(req, res){
 	res.render("drives", {
 			drives:getDriveData(login),
 			username:login.username,
-			canUpload:config.accounts[login.username].canUpload,
+			canUpload:isAllowedPath("uploadForm", login),
 			title:"Drive selection",
 			cache:true, filename:"drives"
 		}
@@ -63,14 +64,15 @@ server.post("/login", function(req, res){
 	res.cookie("password", login.password || "", {maxAge:1000*60*60*24*7});
 	res.redirect(req.headers.referer);
 });
+
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req);
 	if (isAllowedPath("uploadForm", login)){
-		res.render("uploadForm", {username:login.username, cache:true, filename:"uploadForm"})
+		res.render("uploadForm", {username:login.username, cache:true, filename:"uploadForm"});
 	} else {
-		sendError(res, {code:403});
+		sendError(res, {code:403, username:login.username});
 	}
-})
+});
 
 server.post('/upload', upload.single("file"), function(req, res){
 	var login=getLoginFromReq(req);
@@ -79,7 +81,7 @@ server.post('/upload', upload.single("file"), function(req, res){
 		fs.renameSync(req.file.path, filePath);
 		res.render("uploaded", {"file":path.basename(filePath), cache:true, filename:"uploaded"});
 	} else {
-		sendError(res, {code:403});
+		sendError(res, {code:403, username:login.username});
 	}
 });
 
@@ -87,41 +89,51 @@ server.get("/thumb/*", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=req.params[0];
 	if (!isAllowedPath(loc, login)){
-		sendError(res, {code:403});
+		sendError(res, {code:403, username:login.username});
 	} else if (isFile(loc) && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
 		// Generate thumbnail and send it
 		// A bit more involced than res.sendFIle, but oddly nostaligic for when this was built in the HTTP module
-		res.set("Content-Type", "image/jpeg")
+		res.set("Content-Type", "image/jpeg");
 		var stream=childProcess.spawn("convert", [loc, "-format", "jpeg", "-resize", "512x512>", "-"]);
 		stream.stdout.on("data", function(data){
 			res.write(Buffer.from(data));
 		});
 		stream.on("close", function(){
 			res.end();
-		})
+		});
 	} else if (isFile(loc)){
-		sendError(res, {code:400, desc:"File found but invalid for thumbnail generation"});
+		sendError(res, {code:400, desc:"File found but invalid for thumbnail generation", username:login.username});
 	} else if (isDirectory(loc)){
-		sendError(res, {code:400, desc:"Directories cannot be turned into thumbnails"});
+		sendError(res, {code:400, desc:"Directories cannot be turned into thumbnails", username:login.username});
 	} else {
-		sendError(res, {code:400, desc:"Tf did you do to trigger this?"});
+		sendError(res, {code:400, desc:"Tf did you do to trigger this?", username:login.username});
+	}
+});
+
+server.get("/**.lnk", function(req, res){
+	var login=getLoginFromReq(req),
+		loc=req.params[0]+".lnk";
+	if (isAllowedPath(loc, login) && isAllowedPath(getLnkLoc(loc), login)){
+		res.redirect("/"+getLnkLoc(loc));
+	} else {
+		sendError(res, {code:403, username:login.username});
 	}
 });
 
 // Folder/file server
 server.get("/*", function(req, res){
-	var time=new Date().getTime();
-	var login=getLoginFromReq(req),
+	var time=new Date().getTime(),
+		login=getLoginFromReq(req),
 		loc=req.params[0];
 	if (!isAllowedPath(loc, login)){
 		// Login invalid; Return 403
-		sendError(res, {code:403});
+		sendError(res, {code:403, username:login.username});
 	} else if (Object.keys(config.redirs).indexOf(loc)!=-1){
 		// Handle redirects
 		res.redirect(config.redirs[loc]);
 	} else if (!fs.existsSync(loc)){
 		// File/dir not found
-		sendError(res, {code:404});
+		sendError(res, {code:404, username:login.username});
 	} else if (isDirectory(loc)){
 		// Send directory view
 		if (!loc.endsWith("/")){
@@ -142,6 +154,7 @@ server.get("/*", function(req, res){
 		res.sendFile(loc, path.extname(loc)==""?{headers:{"Content-Type":"text"}}:{});
 	}
 });
+
 if (config.useHTTPS){
 	https.createServer({
 		key: fs.readFileSync(config.httpsKey),
@@ -162,12 +175,14 @@ function getDriveData(login){
 }
 
 function getFolderContents(folderLoc, login){
-	var absPath=path.resolve(folderLoc, subFolder),
-		contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
-		.filter(subFolder=>fs.existsSync(absPath)) // "C:/System Volume Information" doesn't exist
-		.filter(subFolder=>isAllowedPath(absPath, login)),
-		folders=contents.filter(subFolder=>isDirectory(absPath)).map(x=>x+"/"),
-		files=contents.filter(subFolder=>isFile(absPath));
+	function abs(subFolder){
+		return path.resolve(folderLoc, subFolder);
+	}
+	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
+		.filter(subFolder=>fs.existsSync(abs(subFolder))) // "C:/System Volume Information" doesn't exist
+		.filter(subFolder=>isAllowedPath(abs(subFolder), login)),
+		folders=contents.filter(subFolder=>isDirectory(abs(subFolder))).map(x=>x+"/"),
+		files=contents.filter(subFolder=>isFile(abs(subFolder)));
 	return {files:files, folders:folders};
 }
 
@@ -178,6 +193,7 @@ function isDirectory(loc){
 		return false;
 	}
 }
+
 function isFile(loc){
 	return !isDirectory(loc);
 }
@@ -189,6 +205,7 @@ function getConfig(){
 	config.viewSettings.folder.videoMode||="link";
 	return config;
 }
+
 function hash(text){
 	return crypto.createHash('sha256').update(text+config.hashSalt).digest("hex");
 }
@@ -197,6 +214,7 @@ function getLoginFromReq(req){
 	var rawReqLogin={username: req.cookies.username, password:req.cookies.password};
 	return validateLogin(rawReqLogin) ? rawReqLogin : {username:"", password:""};
 }
+
 function validateLogin(login){
 	if (Object.keys(config.accounts).indexOf(login.username)==-1){
 		// Nonexistent username is automatically invalid
@@ -207,6 +225,9 @@ function validateLogin(login){
 
 function isAllowedPath(pathAbs, login){
 	pathAbs=pathAbs.replace(/\\/g, "/"); // Windows using \\ as a folder delimiter is stupid
+	if (!(login.username in config.accounts)){
+		console.warn("Login not found in isAllowedPath");
+		return false;
 	if (pathAbs.toLowerCase()=="upload" || pathAbs.toLowerCase()=="uploadform"){
 		return config.accounts[login.username].canUpload;
 	}
@@ -231,6 +252,13 @@ function sendError(res, args){
 		cache:true, filename:"error"
 	});
 	if (!kwargs.nowarn){
-		console.warn(`Error ${args.code} (${args.desc || errorDescs[args.code]})`)
+		console.warn(`Error ${args.code} from ${args.username || "[empty username]"}: (${args.desc || errorDescs[args.code]})`);
 	}
+}
+
+function getLnkLoc(lnkPath){
+	// TODO: Replace this with a system I know can't break
+	var lnkContents=fs.readFileSync(lnkPath).toString(),
+		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i;
+	return lnkRegex.exec(lnkContents)[0].replace(/\\/g, "/");
 }
