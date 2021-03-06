@@ -27,7 +27,8 @@ server.use(express.static(path.resolve("resources")));
 server.set("view engine", "pug");
 
 if (kwargs.hash!=undefined){
-	console.log(hash(kwargs.password));
+	// It took me like an hour to figure out why this gave the wrong hash (kwargs.password was undefined)
+	console.log(hash(kwargs.hash));
 	process.exit();
 }
 
@@ -218,16 +219,19 @@ function getLoginFromReq(req){
 function validateLogin(login){
 	if (Object.keys(config.accounts).indexOf(login.username)==-1){
 		// Nonexistent username is automatically invalid
+		console.warn(`Invalid login detected. Username: ${login.username}`)
 		return false;
 	}
+	console.log(login, config.hashSalt, hash(login.password))
 	return config.accounts[login.username].passHash==hash(login.password);
 }
 
 function isAllowedPath(pathAbs, login){
 	pathAbs=pathAbs.replace(/\\/g, "/"); // Windows using \\ as a folder delimiter is stupid
 	if (!(login.username in config.accounts)){
-		console.warn("Login not found in isAllowedPath");
+		console.warn("Login not found in isAllowedPath (?)");
 		return false;
+	}
 	if (pathAbs.toLowerCase()=="upload" || pathAbs.toLowerCase()=="uploadform"){
 		return config.accounts[login.username].canUpload;
 	}
