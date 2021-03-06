@@ -10,6 +10,8 @@ crypto=require("crypto");
 childProcess=require("child_process");
 
 // Initialize stuff
+_defaultConfigPath=path.join(__dirname, "config.json")
+
 parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
 	add_help:true
@@ -162,12 +164,11 @@ if (config.useHTTPS){
 		cert:fs.readFileSync(config.httpsCert)
 	}, server).listen(443);
 } else {
-	if (!kwargs.noWarn){
-		console.warn("Using HTTP because HTTPS is disabled in the selected config");
-	}
+	warn("Using HTTP because HTTPS is disabled in the selected config");
 	http.createServer(server).listen(80);
 }
 
+// Drive/folder stuff
 function getDriveData(login){
 	return childProcess.execSync("wmic logicaldisk get name")
 		.toString().replace(/ /g, "").split(/[\n\r]+/)
@@ -200,14 +201,30 @@ function isFile(loc){
 }
 
 // Gross internals to ensure security
+function warn(text){
+	if (!kwargs.noWarn){
+		console.warn(text);
+		return true;
+	}
+	return false;
+}
+
 function getConfig(){
-	var config=JSON.parse(fs.readFileSync(kwargs.config));
+	try {
+		var config=JSON.parse(fs.readFileSync(kwargs.config));
+	} catch (e){
+		warn("Selected config file failed to open/parse; Opening default config");
+		var config=JSON.parse(fs.readFileSync(_defaultConfigPath));
+	}
 	config.viewSettings.folder.imageMode||="link";
 	config.viewSettings.folder.videoMode||="link";
 	return config;
 }
 
 function hash(text){
+	if (text===undefined){
+		warn("Hash text is undefined");
+	}
 	return crypto.createHash('sha256').update(text+config.hashSalt).digest("hex");
 }
 
@@ -219,17 +236,16 @@ function getLoginFromReq(req){
 function validateLogin(login){
 	if (Object.keys(config.accounts).indexOf(login.username)==-1){
 		// Nonexistent username is automatically invalid
-		console.warn(`Invalid login detected. Username: ${login.username}`)
+		warn(`Invalid login detected. Username: ${login.username}`);
 		return false;
 	}
-	console.log(login, config.hashSalt, hash(login.password))
 	return config.accounts[login.username].passHash==hash(login.password);
 }
 
 function isAllowedPath(pathAbs, login){
 	pathAbs=pathAbs.replace(/\\/g, "/"); // Windows using \\ as a folder delimiter is stupid
 	if (!(login.username in config.accounts)){
-		console.warn("Login not found in isAllowedPath (?)");
+		warn("Login not found in isAllowedPath (?)");
 		return false;
 	}
 	if (pathAbs.toLowerCase()=="upload" || pathAbs.toLowerCase()=="uploadform"){
@@ -255,9 +271,7 @@ function sendError(res, args){
 		text:args.desc || errorDescs[args.code],
 		cache:true, filename:"error"
 	});
-	if (!kwargs.nowarn){
-		console.warn(`Error ${args.code} from ${args.username || "[empty username]"}: (${args.desc || errorDescs[args.code]})`);
-	}
+	warn(`Error ${args.code} from ${args.username || "[empty username]"}: ${args.desc || errorDescs[args.code]}`);
 }
 
 function getLnkLoc(lnkPath){
