@@ -1,6 +1,7 @@
 {
 	"redirs":{
-		"Short string":"/C:/longer path or website"
+		"Short string":"/C:/longer path or website",
+		"*String that starts with a special char":"C:/Invalid path (no leading `/` = attempts to redirect to file:// protocol)"
 	},
 	"accounts":{
 		"admin":{
@@ -12,9 +13,11 @@
 	},
 	"viewSettings":{
 		"folder":{
-			"imageMode":"thumbnail"
+			"imageMode":"thumbnail/embed/link",
+			"videoMode":"embed/link"
 		}
 	},
+	"hashType":"sha256",
 	"hashSalt":"Put a long random string of text here. Using this is probably fine but not advised",
 	"useHTTPS":false,
 	"httpsKey":"key.pem",

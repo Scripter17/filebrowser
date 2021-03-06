@@ -1,11 +1,11 @@
 # FileBrowser
- A webserver to let you remotely access parts of your computer's filesystem
+A Node.js webserver to let you remotely access parts of your computer's filesystem
 
 **NOTE: This has not been properly pentested. I have put considerable effort into making sure it's safe and secure, but I make no guarentees**
 
 ---
 
-FileBrowser is a project I've been working on for a few years now. It's gone through a few iterations and rebuilds but this is its current form. FileBrowser is a Node.js script that creates a webserver primarily so you can access files from your computer on your phone/3ds/whatnot. I admit, this was built for porn, hence why images are shown in the folder view, but I believe that this is an impressive enough project to put on my GitHub regardless.
+FileBrowser is a project I've been working on for a few years now. It's gone through several iterations and rebuilds but this is its current form. FileBrowser is a Node.js script that creates a webserver primarily so you can access files from your computer on your phone/3ds/whatnot. I admit, this was orginally built for porn. Howver, I've built upon it to the point of it becoming a genuinly useful tool in day-to-day life beyond that.
 
 ---
 
@@ -17,46 +17,34 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 
 ```JSON
 {
-	"redirs":{},
+	"redirs":{
+		"Short string":"/C:/longer path or website",
+		"*String that starts with a special char":"C:/Invalid path (no leading `/` = attempts to redirect to file:// protocol)"
+	},
 	"accounts":{
 		"admin":{
-			"passHash":"",
-			"allow":[],
-			"deny":[],
+			"passHash":"use `main.js -hash [password]` to generate the string to put here *after* setting the hashSalt",
+			"allow":["C:/Directory/file path to allow this user to access", "use a blank string to allow everything (bad idea)"],
+			"deny":["Subfolders of entries in allow to explicityly deny"],
 			"canUpload":false
 		}
-	}
+	},
+	"viewSettings":{
+		"folder":{
+			"imageMode":"thumbnail/embed/link",
+			"videoMode":"embed/link"
+		}
+	},
+	"hashType":"sha256",
+	"hashSalt":"Put a long random string of text here. Using this is probably fine but not advised",
+	"useHTTPS":false,
+	"httpsKey":"key.pem",
+	"httpsCert":"cert.pem"
 }
 ```
 
-### Accounts:
+Todo: Proper documentation
 
-```JSON
-"admin":{
-	"passHash":"e7cf3ef4f17c3999a94f2c6f612e8a888e5b1026878e4e19398b23bd38ec221a",
-	"allow":["C:/Users/Admin/Documents"],
-	"deny":["C:/Users/Admin/Documents/GitHub"],
-	"canUpload":true
-}
-```
-Breakdown:
+# License
 
-- The `admin` key name is the username
-- `passHash` is the SHA256 hash of the admin password (in this case, "Password")
-- `allow` is an array of folders the user is allowed to view. If a folder starts with one of the strings in the array (including `""` for all folders), it is viewable. Leave empty if you want nothing to be viewable
-- `deny` is an array that explicitly deines certain folders, usually subfolders of places in `allow`
-- `canUpload` decides whether or not the user can use `/uploadForm` to upload files to the hosting computers
-
-An empty userstring can be used for a "public" account. Because of how the server works, no login info defaults to both the username and password being empty strings. Useful if you need to share a file with someone on your wifi
-
-### Redirs
-
-Redirs (redirects) are a way of having short names to commonly used files/folders. I use `*home` to map to my custom-built NewTab. The syntax is simple
-
-```JSON
-"redirs":{
-	"shortname":"/C:/Long/Path/Name"
-}
-```
-
-Note the leading `/`. That's important
+This project is released under the ["Don't Be a Dick"](https://dbad-license.org) public license. From my limited research this is compatible with both the MIT and GPL licenses which some packages I use are released under. If it isn't compatible then I will go so far as not using Express.js, because I *will not* release this under anything other than the DBaD PL

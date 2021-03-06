@@ -11,6 +11,10 @@ childProcess=require("child_process");
 
 // Initialize stuff
 _defaultConfigPath=path.join(__dirname, "config.json")
+_errorDescs={
+	403:"File/Directory is not available for this login, assuming it exists",
+	404:"File/Directory not found"
+};
 
 parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
@@ -131,9 +135,9 @@ server.get("/*", function(req, res){
 	if (!isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		sendError(res, {code:403, username:login.username});
-	} else if (Object.keys(config.redirs).indexOf(loc)!=-1){
+	} else if (Object.keys(config.redirects).indexOf(loc)!=-1){
 		// Handle redirects
-		res.redirect(config.redirs[loc]);
+		res.redirect(config.redirects[loc]);
 	} else if (!fs.existsSync(loc)){
 		// File/dir not found
 		sendError(res, {code:404, username:login.username});
@@ -142,10 +146,8 @@ server.get("/*", function(req, res){
 		if (!loc.endsWith("/")){
 			res.redirect("/"+loc+"/");
 		} else {
-			var folderContents=getFolderContents(loc, login);
 			res.render("folder", {
-				files:folderContents.files,
-				folders:folderContents.folders,
+				contents:getFolderContents(loc, login),
 				username:login.username,
 				loc:loc,
 				viewSettings:config.viewSettings.folder,
@@ -159,6 +161,7 @@ server.get("/*", function(req, res){
 });
 
 if (config.useHTTPS){
+	// No I will not default to HTTP if the HTTPS keys are not found
 	https.createServer({
 		key: fs.readFileSync(config.httpsKey),
 		cert:fs.readFileSync(config.httpsCert)
@@ -170,6 +173,7 @@ if (config.useHTTPS){
 
 // Drive/folder stuff
 function getDriveData(login){
+	// TODO: Make this entire script support Linux
 	return childProcess.execSync("wmic logicaldisk get name")
 		.toString().replace(/ /g, "").split(/[\n\r]+/)
 		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/")
@@ -182,7 +186,7 @@ function getFolderContents(folderLoc, login){
 	}
 	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
 		.filter(subFolder=>fs.existsSync(abs(subFolder))) // "C:/System Volume Information" doesn't exist
-		.filter(subFolder=>isAllowedPath(abs(subFolder), login)),
+		.filter(subFolder=>isAllowedPath(abs(subFolder), login)), // Don't let people see the stuff they can't access
 		folders=contents.filter(subFolder=>isDirectory(abs(subFolder))).map(x=>x+"/"),
 		files=contents.filter(subFolder=>isFile(abs(subFolder)));
 	return {files:files, folders:folders};
@@ -200,7 +204,6 @@ function isFile(loc){
 	return !isDirectory(loc);
 }
 
-// Gross internals to ensure security
 function warn(text){
 	if (!kwargs.noWarn){
 		console.warn(text);
@@ -209,10 +212,12 @@ function warn(text){
 	return false;
 }
 
+// Gross internals to ensure security
 function getConfig(){
 	try {
 		var config=JSON.parse(fs.readFileSync(kwargs.config));
 	} catch (e){
+		// If the default config isn't found, this crashes. It's a catastrophic enough problem to leave unhandled
 		warn("Selected config file failed to open/parse; Opening default config");
 		var config=JSON.parse(fs.readFileSync(_defaultConfigPath));
 	}
@@ -222,13 +227,15 @@ function getConfig(){
 }
 
 function hash(text){
+	// Hash used for passwords. Hash type and salt are set in config.json
 	if (text===undefined){
 		warn("Hash text is undefined");
 	}
-	return crypto.createHash('sha256').update(text+config.hashSalt).digest("hex");
+	return crypto.createHash(config.hashType).update(text+config.hashSalt).digest("hex");
 }
 
 function getLoginFromReq(req){
+	// If the provided login is invalid, treat it as an empty login
 	var rawReqLogin={username: req.cookies.username, password:req.cookies.password};
 	return validateLogin(rawReqLogin) ? rawReqLogin : {username:"", password:""};
 }
@@ -244,11 +251,13 @@ function validateLogin(login){
 
 function isAllowedPath(pathAbs, login){
 	pathAbs=pathAbs.replace(/\\/g, "/"); // Windows using \\ as a folder delimiter is stupid
-	if (!(login.username in config.accounts)){
-		warn("Login not found in isAllowedPath (?)");
-		return false;
-	}
+	// This code block shouldn't be able to run, and if it would I'd rather it error out
+	//if (!(login.username in config.accounts)){
+	//	warn("Login not found in isAllowedPath (?)");
+	//	return false;
+	//}
 	if (pathAbs.toLowerCase()=="upload" || pathAbs.toLowerCase()=="uploadform"){
+		// Arguably you can handle this in the allow key but that's dumb and jank
 		return config.accounts[login.username].canUpload;
 	}
 	var isAllowed=config.accounts[login.username].allow.some(function(allowElem){
@@ -261,22 +270,23 @@ function isAllowedPath(pathAbs, login){
 }
 
 function sendError(res, args){
-	var errorDescs={
-		403:"File/Directory is not available for this login, assuming it exists",
-		404:"File/Directory not found"
-	};
+	// Got sick of doing this all over the place
+	// Todo: Put the special errors (such as the 400's in the thumbnail code) in _errorDescs
 	res.status(args.code);
 	res.render("error", {
 		code:args.code,
-		text:args.desc || errorDescs[args.code],
+		text:args.desc || _errorDescs[args.code] || "Error description not given",
 		cache:true, filename:"error"
 	});
-	warn(`Error ${args.code} from ${args.username || "[empty username]"}: ${args.desc || errorDescs[args.code]}`);
+	// Todo: Maybe log IP?
+	warn(`Error ${args.code} from ${args.username || "[empty username]"}: ${args.desc || _errorDescs[args.code]}`);
 }
 
 function getLnkLoc(lnkPath){
-	// TODO: Replace this with a system I know can't break
+	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
+	// Also todo: Replace LNKs entirely by using the @ system I used to use
+	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
-		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i;
+		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
 	return lnkRegex.exec(lnkContents)[0].replace(/\\/g, "/");
 }
