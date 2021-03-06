@@ -251,11 +251,9 @@ function validateLogin(login){
 
 function isAllowedPath(pathAbs, login){
 	pathAbs=pathAbs.replace(/\\/g, "/"); // Windows using \\ as a folder delimiter is stupid
-	// This code block shouldn't be able to run, and if it would I'd rather it error out
-	//if (!(login.username in config.accounts)){
-	//	warn("Login not found in isAllowedPath (?)");
-	//	return false;
-	//}
+	if (!(login.username in config.accounts)){
+		return false;
+	}
 	if (pathAbs.toLowerCase()=="upload" || pathAbs.toLowerCase()=="uploadform"){
 		// Arguably you can handle this in the allow key but that's dumb and jank
 		return config.accounts[login.username].canUpload;
