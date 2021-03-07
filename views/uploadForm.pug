@@ -5,7 +5,7 @@ head
 	title="File upload"
 body
 	="Currently logged in as: "+username+(maxFileSize==-1?"":" (size limit: "+maxFileSize+")")
-	a(href="/")=Home
+	a(href="/")="Home"
 	form(action="/upload" method="post" enctype="multipart/form-data")
 		input(type="file" name="file")
 		br
