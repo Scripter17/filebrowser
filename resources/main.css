@@ -1,6 +1,7 @@
 body{
 	font-family:Consolas, Courier New;
 	font-size:18px;
+	word-wrap:break-word;
 }
 input{
 	font-size:18px;

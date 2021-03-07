@@ -1,13 +1,19 @@
+Features:
 - Make this work on Linux and Mac
 - Per-user stuff
- - Upload folders
- - Upload size limits
+ - Upload folders ✓
+ - Upload size limits (Not possible ATM)
  - Folder view settings
  - Redirects
 - Machine-readable mode (send JSON files instead of HTML?)
 - Darkmode
-- Don't store passwords in the cookie as plaintext
 - Add the @ system
-- Pass config data from CLI
 - GUI mode?
+
+Technical:
 - Automated testing PLEASE
+- Pass config data from CLI
+- Don't store passwords in the cookie as plaintext
+- Don't pass login.password all over the place in the source code
+ - This shouldn't be an issue but it's concerning at best
+- Stop using 400 for everything?

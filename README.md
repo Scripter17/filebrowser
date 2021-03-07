@@ -17,29 +17,28 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 
 ```JSON
 {
-	"redirs":{
-		"Short string":"/C:/longer path or website",
-		"*String that starts with a special char":"C:/Invalid path (no leading `/` = attempts to redirect to file:// protocol)"
-	},
+	"redirs":{},
 	"accounts":{
 		"admin":{
-			"passHash":"use `main.js -hash [password]` to generate the string to put here *after* setting the hashSalt",
-			"allow":["C:/Directory/file path to allow this user to access", "use a blank string to allow everything (bad idea)"],
-			"deny":["Subfolders of entries in allow to explicityly deny"],
+			"passHash":"",
+			"allow":[],
+			"deny":[],
 			"canUpload":false
 		}
 	},
 	"viewSettings":{
 		"folder":{
-			"imageMode":"thumbnail/embed/link",
-			"videoMode":"embed/link"
+			"imageMode":"link",
+			"videoMode":"link"
 		}
 	},
+	"defaultUploadLoc":"./files/",
 	"hashType":"sha256",
-	"hashSalt":"Put a long random string of text here. Using this is probably fine but not advised",
+	"hashSalt":"",
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
-	"httpsCert":"cert.pem"
+	"httpsCert":"cert.pem",
+	"maxFileSize":"8MiB"
 }
 ```
 

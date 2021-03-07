@@ -17,7 +17,7 @@ body
 			br
 			input(type="submit" value="Login")
 	hr
-	if username=="admin"
+	if canUpload
 		a(href="/uploadForm")="Upload file"
 	for drive in drives
 		a(href="./"+drive)=drive

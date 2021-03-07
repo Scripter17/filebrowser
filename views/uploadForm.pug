@@ -4,7 +4,7 @@ head
 	link(href="/main.css" rel="stylesheet")
 	title="File upload"
 body
-	="Currently logged in as: "+username
+	="Currently logged in as: "+username+(maxFileSize==-1?"":" (size limit: "+maxFileSize+")")
 	form(action="/upload" method="post" enctype="multipart/form-data")
 		input(type="file" name="file")
 		br
