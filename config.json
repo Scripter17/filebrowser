@@ -1,5 +1,5 @@
 {
-	"redirs":{},
+	"redirects":{},
 	"accounts":{
 		"admin":{
 			"passHash":"",

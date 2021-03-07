@@ -17,7 +17,7 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 
 ```JSON
 {
-	"redirs":{},
+	"redirects":{},
 	"accounts":{
 		"admin":{
 			"passHash":"",
@@ -43,7 +43,7 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 ```
 
 ## Config documentation
-- `redirs[shortName]="/C:/Path/To/Long/Path"`: Can also be used to link to other websites
+- `redirects[shortName]="/C:/Path/To/Long/Path"`: Can also be used to link to other websites
 - `accounts[account]`: Per-account configuration. (`account` is the username used for logging in)
 - `accounts[account].passHash`: The salted hash for `account`
 - `accounts[account].allow`: An array of files/folders the user can access. a blank string (`""`) allows for all files/folders and is almost always a bad idea
@@ -58,6 +58,8 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `httpsKey`: The path to an HTTPS key (only tested with .pem files)
 - `httpsCery`: The path to an HTTPS cert (only tested with .pem files)
 - `maxFileSize`: Either `-1` for infinite or a number followed by `"B"`, `"KB"`, `"KiB"`, `"MB"`, `"MiB"`, `"GB"`, or `"GiB"`
+
+**Note: You need [imageMagick](https://www.imagemagick.org/)'s convert.exe in your path for thumbnail generation to work**
 
 # License
 

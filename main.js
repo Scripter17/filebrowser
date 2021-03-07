@@ -59,6 +59,7 @@ server.get("/", function(req, res){
 			drives:getDriveData(login),
 			username:login.username,
 			canUpload:isAllowedPath("uploadForm", login),
+			redirects:Object.keys(config.redirects).filter(redirect=>isAllowedPath(redirect, login)),
 			title:"Drive selection",
 			cache:true, filename:"drives"
 		}
@@ -358,6 +359,9 @@ function isAllowedPath(pathAbs, login){
 	if (pathAbs.toLowerCase()==="upload" || pathAbs.toLowerCase()==="uploadform"){
 		// Arguably you can handle this in the allow key but that's dumb and jank
 		return config.accounts[login.username].canUpload!=false;
+	}
+	if (pathAbs in config.redirects){
+		return isAllowedPath(config.redirects[pathAbs].replace(/^\//, ""), login);
 	}
 	var isAllowed=config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents

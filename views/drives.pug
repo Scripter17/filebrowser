@@ -19,6 +19,8 @@ body
 	hr
 	if canUpload
 		a(href="/uploadForm")="Upload file"
+	for redirect in redirects
+		a(href="/"+redirect)=redirect
 	for drive in drives
 		a(href="./"+drive)=drive
 		br
