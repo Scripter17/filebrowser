@@ -24,7 +24,7 @@ body
 		br
 	for file in contents.files
 		if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.imageMode || "link")=="embed"
-			a(href=file): img(src=(viewSettings.imageMode=="thumbnail"?"/thumb/":"")+loc+file.replace(/^.\//, "") alt=file)
+			a(href=file): img(src="/"+loc+file.replace(/^.\//, "") alt=file)
 		else if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.imageMode || "link")=="thumbnail"
 			a(href=file): img(src="/thumb/"+loc+file.replace(/^.\//, "") alt=file)
 		else if /\.(mp4|mov|webm)$/.test(file) && (viewSettings.videoMode || "link")=="embed"

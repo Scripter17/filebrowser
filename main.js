@@ -9,12 +9,9 @@ fs=require("fs");
 crypto=require("crypto");
 childProcess=require("child_process");
 
-// Initialize stuff
-_errorDescs={
-	403:"File/Directory is not available for this login, assuming it exists",
-	404:"File/Directory not found"
-};
+// == INITIALIZATION ==
 
+// Argument parsing
 parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
 	add_help:true
@@ -24,19 +21,26 @@ parser.add_argument("-hash", {help:"Calculate account password hash", metavar:"p
 parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad idea)", action:"store_true"});
 kwargs=parser.parse_args();
 
+// Get and validate config
 getConfig();
+
+// Handle -hash
+if (kwargs.hash!=undefined){
+	console.log(hash(kwargs.hash));
+	process.exit();
+}
+
+// Set up server and middlewares
 server=express();
 server.use(express.urlencoded({extended: true}));
 server.use(cookieParser());
 server.use(express.static(path.resolve("resources")));
 server.set("view engine", "pug");
 
-if (kwargs.hash!=undefined){
-	// It took me like an hour to figure out why this gave the wrong hash (kwargs.password was undefined)
-	console.log(hash(kwargs.hash));
-	process.exit();
-}
+// == URL handlers ==
 
+// Upload handler
+// TODO: Per-user file size limits
 uploadHandler=multer({
 	dest:"./files/",
 	fileFilter:function(req, file, callback){
@@ -69,11 +73,13 @@ server.post("/login", function(req, res){
 		login={username:"", password:""};
 	}
 	// Set login cookies for 1 week
+	// TODO: Use GPG or something to make a login token that can't work after the week is up
 	res.cookie("username", login.username || "", {maxAge:1000*60*60*24*7});
 	res.cookie("password", login.password || "", {maxAge:1000*60*60*24*7});
 	res.redirect(req.headers.referer);
 });
 
+// Upload form
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req);
 	if (isAllowedPath("uploadForm", login)){
@@ -83,23 +89,23 @@ server.get("/uploadForm", function(req, res){
 	}
 });
 
+// Upload handler
 server.post('/upload', function(req, res){
 	var login=getLoginFromReq(req);
 	if (isAllowedPath("upload", login)){
 		uploadHandler(req, res, function (err){
-			console.log(err)
-			if (err instanceof multer.MulterError){
+			if (err instanceof multer.MulterError){ // TODO: Detect only file too large errors
 				sendError(req, res, {code:413, username:login.username, desc:"File too large"});
 			} else if (req.file==undefined){
 				sendError(req, res, {code:400, username:login.username, desc:"No file given"});
 			} else if (err){
-				sendError(req, res, {code:500, username:login.username, desc:"Unknown error handling file upload"})
+				sendError(req, res, {code:500, username:login.username, desc:"Unknown error handling file upload"});
 			} else {
 				var uploadFolder=config.accounts[login.username].canUpload,
-					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder,
-					filePath=path.join(uploadFolder, new Date().getTime()+"-"+login.username+"-"+req.file.originalname);
-				fs.renameSync(req.file.path, filePath);
-				res.render("uploaded", {"file":path.basename(filePath), cache:true, filename:"uploaded"});
+					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
+					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
+				moveFile(req.file.path, filePath); // fs.renameSync failes when moving between drives
+				res.render("uploaded", {"file":req.file.originalname, cache:true, filename:"uploaded"});
 			}
 		});
 	} else {
@@ -107,31 +113,39 @@ server.post('/upload', function(req, res){
 	}
 });
 
+// Thumbnail generator
 server.get("/thumb/*", function(req, res){
 	var login=getLoginFromReq(req),
-		loc=req.params[0];
+		loc=req.params[0], stream;
+	req.on("close", function(){
+		// No point in rendering thumbnails the client won't see
+		// Also means lots of images won't keep taking up CPU when the client leaves
+		stream.kill();
+	});
 	if (!isAllowedPath(loc, login)){
 		sendError(req, res, {code:403, username:login.username});
-	} else if (isFile(loc) && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
+	} else if (pathIsFile(loc) && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
 		// Generate thumbnail and send it
 		// A bit more involced than res.sendFIle, but oddly nostaligic for when this was built in the HTTP module
 		res.set("Content-Type", "image/jpeg");
-		var stream=childProcess.spawn("convert", [loc, "-format", "jpeg", "-resize", "512x512>", "-"]);
+		stream=childProcess.spawn("convert", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"]);
 		stream.stdout.on("data", function(data){
 			res.write(Buffer.from(data));
 		});
 		stream.on("close", function(){
 			res.end();
 		});
-	} else if (isFile(loc)){
-		sendError(req, res, {code:400, desc:"File found but invalid for thumbnail generation", username:login.username});
-	} else if (isDirectory(loc)){
-		sendError(req, res, {code:400, desc:"Directories cannot be turned into thumbnails", username:login.username});
+	} else if (pathIsFile(loc)){
+		sendError(req, res, {code:400, username:login.username, desc:"File found but invalid for thumbnail generation"});
+	} else if (pathIsDirectory(loc)){
+		sendError(req, res, {code:400, username:login.username, desc:"Directories cannot be turned into thumbnails"});
 	} else {
-		sendError(req, res, {code:400, desc:"Tf did you do to trigger this?", username:login.username});
+		sendError(req, res, {code:400, username:login.username, desc:"Tf did you do to trigger this?"});
 	}
 });
 
+// LNK handler
+// TODO: Make optional
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=req.params[0]+".lnk";
@@ -156,7 +170,7 @@ server.get("/*", function(req, res){
 	} else if (!pathExists(loc)){
 		// File/dir not found
 		sendError(req, res, {code:404, username:login.username});
-	} else if (isDirectory(loc)){
+	} else if (pathIsDirectory(loc)){
 		// Send directory view
 		if (!loc.endsWith("/")){
 			res.redirect("/"+loc+"/");
@@ -175,8 +189,8 @@ server.get("/*", function(req, res){
 	}
 });
 
+// TODO: Built-in onionsite support?
 if (config.useHTTPS){
-	// No I will not default to HTTP if the HTTPS keys are not found
 	https.createServer({
 		key: fs.readFileSync(config.httpsKey),
 		cert:fs.readFileSync(config.httpsCert)
@@ -186,33 +200,23 @@ if (config.useHTTPS){
 	http.createServer(server).listen(80);
 }
 
-// Drive/folder stuff
-function getDriveData(login){
-	// TODO: Make this entire script support Linux
-	return childProcess.execSync("wmic logicaldisk get name")
-		.toString().replace(/ /g, "").split(/[\n\r]+/) // Extract non-empty lines
-		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
-		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
-}
-
-function getFolderContents(folderLoc, login){
-	function abs(subFolder){
-		return path.resolve(folderLoc, subFolder);
+// == FUNCTIONS ==
+// Meta
+function warn(text){
+	if (!kwargs.noWarn){
+		console.warn(text);
+		return true;
 	}
-	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
-		.filter(subFolder=>pathExists(abs(subFolder))) // "C:/System Volume Information" doesn't exist
-		.filter(subFolder=>isAllowedPath(abs(subFolder), login)), // Don't let people see the stuff they can't access
-		folders=contents.filter(subFolder=>isDirectory(abs(subFolder))).map(x=>x+"/"),
-		files=contents.filter(subFolder=>isFile(abs(subFolder)));
-	return {files:files, folders:folders};
+	return false;
 }
 
-function isDirectory(loc){
+// Generic filesystem
+function pathIsDirectory(loc){
 	try {
 		return fs.lstatSync(loc).isDirectory();
 	} catch {return false;}
 }
-function isFile(loc){
+function pathIsFile(loc){
 	try {
 		return !fs.lstatSync(loc).isDirectory();
 	} catch {return false;}
@@ -222,19 +226,43 @@ function pathExists(loc){
 		return fs.existsSync(loc);
 	} catch {return false;}
 }
-
-function warn(text){
-	if (!kwargs.noWarn){
-		console.warn(text);
-		return true;
+function moveFile(oldLoc, newLoc){
+	// Idea taken from https://stackoverflow.com/a/29105404/10720231
+	try {
+		fs.renameSync(oldLoc, newLoc);
+	} catch {
+		fs.copyFileSync(oldLoc, newLoc);
+		fs.rmSync(oldLoc);
 	}
-	return false;
 }
 
-// Gross internals to ensure security
+// Drive/folder
+function getDriveData(login){
+	// TODO: Make this entire script support Linux
+	return childProcess.execSync("wmic logicaldisk get name")
+		.toString().replace(/ /g, "").split(/[\n\r]+/) // Extract non-empty lines
+		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
+		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
+}
+function getFolderContents(folderLoc, login){
+	function abs(subFolder){
+		return path.resolve(folderLoc, subFolder);
+	}
+	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
+		.filter(subFolder=>pathExists(abs(subFolder))) // "C:/System Volume Information" doesn't exist
+		.filter(subFolder=>isAllowedPath(abs(subFolder), login)), // Don't let people see the stuff they can't access
+		folders=contents.filter(subFolder=>pathIsDirectory(abs(subFolder))).map(x=>x+"/"),
+		files=contents.filter(subFolder=>pathIsFile(abs(subFolder)));
+	return {files:files, folders:folders};
+}
+
+// Config
 function getConfig(){
+	// Yeah yeah "global variables bad"
+	// Look pretty much every major function in this mess of a program needs to reference the config and it doesn't change
+	// It'd be stupider to *not* use a global variable here
 	config=JSON.parse(fs.readFileSync(kwargs.config));
-	validateConfig(config);
+	validateConfig(config); // Yes this is supposed to throw an error on an invalid config
 }
 function validateConfig(){
 	// Validate redirects
@@ -266,7 +294,7 @@ function validateConfig(){
 			if (!pathExists(path.resolve(account.canUpload))){
 				throw new Error(`Account "${account}"'s upload path has been set to a nonexistent location`);
 			}
-			if (!isDirectory(account.canUpload)){ // isDirectory is used for clarity
+			if (!pathIsDirectory(account.canUpload)){ // pathIsDirectory is used for clarity
 				throw new Error(`Account "${account}"'s upload path is not a directory`);
 			}
 		}
@@ -287,15 +315,16 @@ function validateConfig(){
 		throw new Error(`maxFileSize is set to an invalid value ("${config.maxFileSize}")`);
 	}
 	if (config.useHTTPS){
-		if (!pathExists(config.httpsKey) || !isFile(config.httpsKey)){
+		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
 			throw new Error(`Invalid httpsCert provided ("${config.httpsKey}")`);
 		}
-		if (!pathExists(config.httpsKey) || !isFile(config.httpsKey)){
+		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
 			throw new Error(`Invalid httpsCert provided ("${config.httpsKey}")`);
 		}
 	}
 }
 
+// Login/Validation
 function hash(text){
 	// Hash used for passwords. Hash type and salt are set in config.json
 	if (text===undefined){
@@ -303,14 +332,15 @@ function hash(text){
 	}
 	return crypto.createHash(config.hashType).update(text+config.hashSalt).digest("hex");
 }
-
 function getLoginFromReq(req){
 	// If the provided login is invalid, treat it as an empty login
-	var rawReqLogin={username: req.cookies.username, password:req.cookies.password};
+	var rawReqLogin={username: req.cookies.username || "", password:req.cookies.password || ""};
 	return validateLogin(rawReqLogin) ? rawReqLogin : {username:"", password:""};
 }
-
 function validateLogin(login){
+	if (typeof login!="object" || !("username" in login) || !("password" in login)){
+		return false;
+	}
 	if (!(login.username in config.accounts)){
 		// Nonexistent username is automatically invalid
 		warn(`Invalid login detected. Username: ${login.username}`);
@@ -318,7 +348,6 @@ function validateLogin(login){
 	}
 	return config.accounts[login.username].passHash===hash(login.password);
 }
-
 function isAllowedPath(pathAbs, login){
 	if (!(validateLogin(login)) || pathAbs===undefined){
 		// Need to handle the case where the empty username isn't defined, since that's what getLoginFromReq defaults to
@@ -340,25 +369,31 @@ function isAllowedPath(pathAbs, login){
 	return isAllowed && !isDenied && (isLnkLoc(pathAbs)===isAllowedPath(getLnkLoc(pathAbs), login));
 }
 
+// Error handler
 function sendError(req, res, args){
 	// Got sick of doing this all over the place
-	// Todo: Put the special errors (such as the 400's in the thumbnail code) in _errorDescs
+	// Todo: Put the special errors (such as the 400's in the thumbnail code) in errorDescs
+	var errorDescs={
+		403:"File/Directory is not available for this login, assuming it exists",
+		404:"File/Directory not found"
+	};
 	res.status(args.code);
 	res.render("error", {
 		code:args.code,
-		text:args.desc || _errorDescs[args.code] || "Error description not given",
+		text:args.desc || errorDescs[args.code] || "Error description not given",
 		referer:req.headers.referer,
 		cache:true, filename:"error"
 	});
 	// Todo: Maybe log IP?
-	warn(`Error ${args.code} from ${args.username || "[empty username]"}: ${args.desc || _errorDescs[args.code]}`);
+	warn(`Error ${args.code} from ${args.username || "[empty username]"}: ${args.desc || errorDescs[args.code]}`);
 }
 
-function getLnkLoc(lnkPath){
+// LNK handler
+function getLnkLoc(lnkPath, skipValidation){
 	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
 	// Also todo: Replace LNKs entirely by using the @ system I used to use
 	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
-	if (!isLnkLoc(lnkPath)){
+	if (!skipValidation && !isLnkLoc(lnkPath)){
 		return undefined
 	}
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
@@ -370,9 +405,11 @@ function getLnkLoc(lnkPath){
 	}
 }
 function isLnkLoc(lnkPath){
-	return isFile(lnkPath) && path.extname(lnkPath)=="lnk";
+	// Honestly this is just here so sublime witll let me collapse the function
+	return pathIsFile(lnkPath) && path.extname(lnkPath)=="lnk" && getLnkLoc(lnkPath, true);
 }
 
+// Sizestring for uploading
 function sizeStringToBytes(sizeStr){
 	if (sizeStr==-1){
 		return Infinity;

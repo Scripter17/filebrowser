@@ -106,3 +106,4 @@ dist
 # Why yes, I use this Git repo as my personal instal
 debug-config.json
 *.pem
+files
