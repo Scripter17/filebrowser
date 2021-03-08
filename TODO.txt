@@ -3,7 +3,7 @@ Features:
 - Per-user stuff
  - Upload folders ✓
  - Upload size limits (Not possible ATM)
- - Folder view settings
+ - Folder view settings ✓
  - Redirects
 - Machine-readable mode (send JSON files instead of HTML?)
 - Darkmode

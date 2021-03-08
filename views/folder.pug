@@ -23,11 +23,11 @@ body
 		a(href=folder)=folder
 		br
 	for file in contents.files
-		if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.imageMode || "link")=="embed"
+		if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.folder.imageMode || "link")=="embed"
 			a(href=file): img(src="/"+loc+file.replace(/^.\//, "") alt=file)
-		else if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.imageMode || "link")=="thumbnail"
+		else if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.folder.imageMode || "link")=="thumbnail"
 			a(href=file): img(src="/thumb/"+loc+file.replace(/^.\//, "") alt=file)
-		else if /\.(mp4|mov|webm)$/.test(file) && (viewSettings.videoMode || "link")=="embed"
+		else if /\.(mp4|mov|webm)$/.test(file) && (viewSettings.folder.videoMode || "link")=="embed"
 			video(controls): source(src=file)
 		else
 			a(href=file)=file

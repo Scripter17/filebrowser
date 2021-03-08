@@ -23,7 +23,12 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 			"passHash":"",
 			"allow":[],
 			"deny":[],
-			"canUpload":false
+			"canUpload":false,
+			"viewSettings":{
+				"folder":{
+					"imageMode":"thumbnail"
+				}
+			}
 		}
 	},
 	"viewSettings":{
@@ -32,7 +37,7 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 			"videoMode":"link"
 		}
 	},
-	"defaultUploadLoc":"./files/",
+	"defaultUploadLoc":"./files",
 	"hashType":"sha256",
 	"hashSalt":"",
 	"useHTTPS":false,
@@ -49,6 +54,7 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `accounts[account].allow`: An array of files/folders the user can access. a blank string (`""`) allows for all files/folders and is almost always a bad idea
 - `accounts[account].deny`: An array of files/folders inside of folders listed in `accounts[account].allow` to explicitly deny
 - `accounts[account].canUpload`: Either `true` to allow uploading to `defaultUploadLoc` or a string to specify a per-user upload location. Should be kept as `false` for accounts other than the admin one
+- `accounts[account].viewSettings` (optional): A per-user override for the `viewSettings` key
 - `viewSettings.folder.imageMode`: Either `"link"`, `"embed"`, or `"thumbnail"`. Works as expected (thumbnails are at most 512x512 and much less resource/network intenseive than `embed`)
 - `viewSettings.folder.videoMode`: Either `"link"` or `"embed"`. Works the same as `viewSettings.folder.imageMode` except for videos
 - `defaultUplodLoc`: The default path for uploaded files to be placed into. Can be overriden on a per-user basis in `accounts[account].canUpload`

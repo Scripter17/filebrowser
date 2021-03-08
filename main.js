@@ -180,7 +180,7 @@ server.get("/*", function(req, res){
 				contents:getFolderContents(loc, login),
 				username:login.username,
 				loc:loc,
-				viewSettings:config.viewSettings.folder,
+				viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
 				cache:true, filename:"folder"
 			});
 		}

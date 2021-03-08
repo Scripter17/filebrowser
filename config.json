@@ -5,7 +5,12 @@
 			"passHash":"",
 			"allow":[],
 			"deny":[],
-			"canUpload":false
+			"canUpload":false,
+			"viewSettings":{
+				"folder":{
+					"imageMode":"thumbnail"
+				}
+			}
 		}
 	},
 	"viewSettings":{
@@ -14,7 +19,7 @@
 			"videoMode":"link"
 		}
 	},
-	"defaultUploadLoc":"./files/",
+	"defaultUploadLoc":"./files",
 	"hashType":"sha256",
 	"hashSalt":"",
 	"useHTTPS":false,
