@@ -106,7 +106,7 @@ server.post('/upload', function(req, res){
 					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
 					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
 				moveFile(req.file.path, filePath); // fs.renameSync failes when moving between drives
-				res.render("uploaded", {"file":req.file.originalname, cache:true, filename:"uploaded"});
+				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:true, filename:"uploaded"});
 			}
 		});
 	} else {
@@ -118,24 +118,21 @@ server.post('/upload', function(req, res){
 server.get("/thumb/*", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=req.params[0], stream;
-	req.on("close", function(){
-		// No point in rendering thumbnails the client won't see
-		// Also means lots of images won't keep taking up CPU when the client leaves
-		stream.kill();
-	});
 	if (!isAllowedPath(loc, login)){
 		sendError(req, res, {code:403, username:login.username});
 	} else if (pathIsFile(loc) && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
 		// Generate thumbnail and send it
 		// A bit more involced than res.sendFIle, but oddly nostaligic for when this was built in the HTTP module
-		res.set("Content-Type", "image/jpeg");
-		stream=childProcess.spawn("convert", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"]);
-		stream.stdout.on("data", function(data){
-			res.write(Buffer.from(data));
-		});
-		stream.on("close", function(){
-			res.end();
-		});
+		var imageSize=/\d+x\d+/.exec(childProcess.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
+		if (imageSize[0]*imageSize[1]>=10000*10000){
+			res.sendFile(path.resolve("resources/TooBig.png"));
+		} else {
+			res.set("Content-Type", "image/jpeg");
+			stream=childProcess.spawn("magick", [loc+"[0]", "-format", "jpeg", "-thumbnail", "512x512>", "-"], {"env":{"MAGICK_TEMPORARY_PATH":path.resolve("temp"), "MAGICK_DISK_LIMIT":sizeStringToBytes("4GiB")}});
+			req.on("close", function(){stream.kill();});
+			stream.stdout.on("data", function(data){res.write(Buffer.from(data));});
+			stream.on("close", function(){res.end();});
+		}
 	} else if (pathIsFile(loc)){
 		sendError(req, res, {code:400, username:login.username, desc:"File found but invalid for thumbnail generation"});
 	} else if (pathIsDirectory(loc)){
@@ -267,6 +264,12 @@ function getConfig(){
 }
 function validateConfig(){
 	// Validate redirects
+	var validViewSettings={
+		"folder":{
+			"imageMode": ["link", "embed", "thumbnail"],
+			"videoMode": ["link", "embed"]
+		}
+	};
 	for (let redirect in config.redirects){
 		if (/^[a-z\d]*:\/[^\/]/i.test(config.redirects[redirect])){
 			throw new Error(`Redirect "${redirect}" redirects to invalid path`);
@@ -274,42 +277,56 @@ function validateConfig(){
 	}
 	// Validate accounts
 	for (let account in config.accounts){
-		if (config.accounts[account].passHash.length!=hash("", config).length){
-			throw new Error(`Account "${account}" has an invalid password hash length`);
+		var accountData=config.accounts[account];
+		if (accountData.passHash.length!=hash("", config).length){
+			throw new Error(`${account} has an invalid password hash length`);
 		}
-		for (let denyElem of config.accounts[account].deny){
-			if (!config.accounts[account].allow.some(allowElem=>denyElem.toLowerCase().startswith(allowElem.toLowerCase()))){
-				warn(`Account "${account}" is denied "${denyElem}" despite not being allowed any of its parents`);
+		for (let denyElem of accountData.deny){
+			if (!accountData.allow.some(allowElem=>denyElem.toLowerCase().startswith(allowElem.toLowerCase()))){
+				warn(`${account} is denied ${denyElem} despite not being allowed any of its parents`);
 			}
 		}
-		if (account=="" && config.accounts[account].canUpload!=false){
-			warn(`Default account has been granted upload permissions`);
-		}
-		if (account=="" && hash("", config)!=config.accounts[account].passHash){
-			warn(`Default account has a non-empty password`);
-		}
-		if (account!="" && hash("", config)==config.accounts[account].passHash){
-			warn(`Account "${account}" has an empty password`);
-		}
-		if (typeof account.canUpload=="string"){
-			if (!pathExists(path.resolve(account.canUpload))){
-				throw new Error(`Account "${account}"'s upload path has been set to a nonexistent location`);
+		if (account==""){
+			if (accountData.canUpload!=false){
+				warn(`Default account has been granted upload permissions`);
 			}
-			if (!pathIsDirectory(account.canUpload)){ // pathIsDirectory is used for clarity
-				throw new Error(`Account "${account}"'s upload path is not a directory`);
+			if (hash("", config)!=accountData.passHash){
+				warn(`Default account has a non-empty password`);
+			}
+		}
+		if (account!="" && hash("", config)==accountData.passHash){
+			warn(`${account} has an empty password`);
+		}
+		if (typeof accountData.canUpload=="string"){
+			if (!pathExists(path.resolve(accountData.canUpload))){
+				throw new Error(`${account}'s upload path has been set to a nonexistent location`);
+			}
+			if (!pathIsDirectory(accountData.canUpload)){ // pathIsDirectory is used for clarity
+				throw new Error(`${account}'s upload path is not a directory`);
+			}
+		}
+		for (let view in validViewSettings){
+			for (let setting in validViewSettings[view]){
+				if (!("viewSettings" in accountData) || !(view in accountData.viewSettings) || !(setting in accountData.viewSettings[view])){
+					continue;
+				}
+				if (validViewSettings[view][setting].indexOf(accountData.viewSettings[view][setting])==-1){
+					throw new Error(`${account}'s viewSettings.${view}.${setting} has an invalid value of "${accountData.viewSettings[view][setting]}"`);
+				}
 			}
 		}
 	}
-	// Validate folderview
-	if (["link", "embed", "thumbnail"].indexOf(config.viewSettings.folder.imageMode)==-1){
-		throw new Error(`Folder view's imageMode has been set to an invalid value ("${config.viewSettings.folder.imageMode}")`);
-	}
-	if (["link", "embed"].indexOf(config.viewSettings.folder.videoMode)==-1){
-		throw new Error(`Folder view's imageMode has been set to an invalid value ("${config.viewSettings.folder.videoMode}")`);
+	for (let view in validViewSettings){
+		for (let setting in validViewSettings[view]){
+			if (validViewSettings[view][setting].indexOf(config.viewSettings[view][setting])==-1){
+				throw new Error(`viewSettings.${view}.${setting} has an invalid value of "${config.viewSettings[view][setting]}"`);
+			}
+		}
 	}
 	// Validate hashSalt
 	if (config.hashSalt.length<8){
-		warn(`Config's hashSalt is short (less than 8 characters)`);
+		// Should this be an error?
+		warn(`hashSalt is short (less than 8 characters)`);
 	}
 	// Validate maxFileSize
 	if (!isValidSizeString(config.maxFileSize)){
@@ -317,10 +334,10 @@ function validateConfig(){
 	}
 	if (config.useHTTPS){
 		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
-			throw new Error(`Invalid httpsCert provided ("${config.httpsKey}")`);
+			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsKey}")`);
 		}
 		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
-			throw new Error(`Invalid httpsCert provided ("${config.httpsKey}")`);
+			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsKey}")`);
 		}
 	}
 }
@@ -386,6 +403,7 @@ function sendError(req, res, args){
 		code:args.code,
 		text:args.desc || errorDescs[args.code] || "Error description not given",
 		referer:req.headers.referer,
+		username:args.username,
 		cache:true, filename:"error"
 	});
 	// Todo: Maybe log IP?

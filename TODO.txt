@@ -9,6 +9,7 @@ Features:
 - Darkmode
 - Add the @ system
 - GUI mode?
+- Download folders (zip files?)
 
 Technical:
 - Automated testing PLEASE
@@ -17,3 +18,4 @@ Technical:
 - Don't pass login.password all over the place in the source code
  - This shouldn't be an issue but it's concerning at best
 - Stop using 400 for everything?
+- Make thumbnail generation take less CPU (hard cap on CPU usage, not more efficiency)

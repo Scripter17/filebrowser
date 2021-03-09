@@ -3,7 +3,7 @@ head
 	meta(name="viewport" content="width=device-width, initial-scale=1.0")
 	link(href="/main.css" rel="stylesheet")
 	title=title
-body
+body(class="view-drives" username=username)
 	if username!=""
 		="Currently logged in as: "+username
 		form(action="/login" method="POST")
@@ -18,9 +18,9 @@ body
 			input(type="submit" value="Login")
 	hr
 	if canUpload
-		a(href="/uploadForm")="Upload file"
+		a(href="/uploadForm" class="uploadForm")="Upload file"
 	for redirect in redirects
-		a(href="/"+redirect)=redirect
+		a(href="/"+redirect class="redirect")=redirect
 	for drive in drives
-		a(href="./"+drive)=drive
+		a(href="./"+drive class="drive")=drive
 		br

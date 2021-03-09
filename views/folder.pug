@@ -3,7 +3,7 @@ head
 	meta(name="viewport" content="width=device-width, initial-scale=1.0")
 	link(href="/main.css" rel="stylesheet")
 	title=loc
-body
+body(class="view-folder" username=username)
 	if username!=""
 		="Currently logged in as: "+username
 	else
@@ -20,14 +20,14 @@ body
 	a(href="..")=".."
 	hr
 	for folder in contents.folders
-		a(href=folder)=folder
+		a(href=folder class="folder")=folder
 		br
 	for file in contents.files
 		if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.folder.imageMode || "link")=="embed"
-			a(href=file): img(src="/"+loc+file.replace(/^.\//, "") alt=file)
+			a(href=file class="file image embed"): img(src="/"+loc+file.replace(/^.\//, "") alt=file)
 		else if /\.(a?png|jpe?g|gif)$/.test(file) && (viewSettings.folder.imageMode || "link")=="thumbnail"
-			a(href=file): img(src="/thumb/"+loc+file.replace(/^.\//, "") alt=file)
+			a(href=file class="file image thumbnail"): img(src="/thumb/"+loc+file.replace(/^.\//, "") alt=file)
 		else if /\.(mp4|mov|webm)$/.test(file) && (viewSettings.folder.videoMode || "link")=="embed"
-			video(controls): source(src=file)
+			video(controls class="file video"): source(src=file)
 		else
-			a(href=file)=file
+			a(href=file class="file link")=file
