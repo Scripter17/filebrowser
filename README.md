@@ -7,6 +7,8 @@ A Node.js webserver to let you remotely access parts of your computer's filesyst
 
 FileBrowser is a project I've been working on for a few years now. It's gone through several iterations and rebuilds but this is its current form. FileBrowser is a Node.js script that creates a webserver primarily so you can access files from your computer on your phone/3ds/whatnot. I admit, this was orginally built for porn. However, I've built upon it to the point of it becoming a genuinly useful tool in day-to-day life beyond that.
 
+**Note: You need [imageMagick](https://www.imagemagick.org/) installed for thumbnail generation to work**
+
 ---
 
 ## Config.json
@@ -64,8 +66,6 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `httpsKey`: The path to an HTTPS key (only tested with .pem files)
 - `httpsCery`: The path to an HTTPS cert (only tested with .pem files)
 - `maxFileSize`: Either `-1` for infinite or a number followed by `"B"`, `"KB"`, `"KiB"`, `"MB"`, `"MiB"`, `"GB"`, or `"GiB"`
-
-**Note: You need [imageMagick](https://www.imagemagick.org/)'s convert.exe in your path for thumbnail generation to work**
 
 # License
 
