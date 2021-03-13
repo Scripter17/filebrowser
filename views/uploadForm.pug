@@ -3,8 +3,13 @@ head
 	meta(name="viewport" content="width=device-width, initial-scale=1.0")
 	link(href="/main.css" rel="stylesheet")
 	title="File upload"
-body(class="view-uploadForm" username=username maxfilesize=maxFileSize)
-	="Currently logged in as: "+username+(maxFileSize==-1?"":" (max file size: "+maxFileSize+")")
+body(view="uploadForm" username=username maxfilesize=maxFileSize)
+	="Currently logged in as: "
+	span#username=username
+	if maxFileSize!=-1
+		=" (max file size: "
+		span#maxFileSize=maxFileSize
+		=")"
 	a(href="/")="Home"
 	form(action="/upload" method="post" enctype="multipart/form-data")
 		input(type="file" name="file")

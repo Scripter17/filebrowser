@@ -3,11 +3,11 @@ head
 	meta(name="viewport" content="width=device-width, initial-scale=1.0")
 	link(href="/main.css" rel="stylesheet")
 	title=code
-body(class="view-error" username=username code=code)
+body(view="error" username=username code=code desc=desc)
 	="Error "
-	=code
+	span#code=code
 	=": "
-	=text
+	span#desc=desc
 	if code==403
 		form(action="/login" method="POST")
 			input(type="text" name="username" placeholder="username" autocomplete="new-password")
@@ -15,4 +15,4 @@ body(class="view-error" username=username code=code)
 			input(type="password" name="password" placeholder="password" autocomplete="new-password")
 			br
 			input(type="submit" value="Login/Logout")
-	a(href=referer)="Go back"
+	a(href=back)="Go back"

@@ -7,7 +7,7 @@ multer=require("multer");
 path=require("path");
 fs=require("fs");
 crypto=require("crypto");
-childProcess=require("child_process");
+child_process=require("child_process");
 
 // == INITIALIZATION ==
 
@@ -22,7 +22,8 @@ parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad id
 kwargs=parser.parse_args();
 
 // Get and validate config
-getConfig();
+// TODO: MAKE THIS NOT A GLOBAL VARIABLE
+config=getConfig();
 
 // Handle -hash
 if (kwargs.hash!=undefined){
@@ -47,9 +48,7 @@ uploadHandler=multer({
 		// It works but the docs don't explain why
 		callback(null, isAllowedPath("upload", getLoginFromReq(req)));
 	},
-	limits:{
-		"fileSize":sizeStringToBytes(config.maxFileSize)
-	}
+	limits:{"fileSize":sizeStringToBytes(config.maxFileSize)}
 }).single("file");
 
 // Drive selection / Login screen
@@ -61,7 +60,7 @@ server.get("/", function(req, res){
 			canUpload:isAllowedPath("uploadForm", login),
 			redirects:Object.keys(config.redirects).filter(redirect=>isAllowedPath(redirect, login)),
 			title:"Drive selection",
-			cache:true, filename:"drives"
+			cache:config.cacheViews, filename:"drives"
 		}
 	);
 });
@@ -84,7 +83,7 @@ server.post("/login", function(req, res){
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req);
 	if (isAllowedPath("uploadForm", login)){
-		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:true, filename:"uploadForm"});
+		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.cacheViews, filename:"uploadForm"});
 	} else {
 		sendError(req, res, {code:403, username:login.username});
 	}
@@ -106,39 +105,11 @@ server.post('/upload', function(req, res){
 					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
 					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
 				moveFile(req.file.path, filePath); // fs.renameSync failes when moving between drives
-				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:true, filename:"uploaded"});
+				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:config.cacheViews, filename:"uploaded"});
 			}
 		});
 	} else {
 		sendError(req, res, {code:403, username:login.username});
-	}
-});
-
-// Thumbnail generator
-server.get("/thumb/*", function(req, res){
-	var login=getLoginFromReq(req),
-		loc=req.params[0], stream;
-	if (!isAllowedPath(loc, login)){
-		sendError(req, res, {code:403, username:login.username});
-	} else if (pathIsFile(loc) && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
-		// Generate thumbnail and send it
-		// A bit more involced than res.sendFIle, but oddly nostaligic for when this was built in the HTTP module
-		var imageSize=/\d+x\d+/.exec(childProcess.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
-		if (imageSize[0]*imageSize[1]>=10000*10000){
-			res.sendFile(path.resolve("resources/TooBig.png"));
-		} else {
-			res.set("Content-Type", "image/jpeg");
-			stream=childProcess.spawn("magick", [loc+"[0]", "-format", "jpeg", "-thumbnail", "512x512>", "-"], {"env":{"MAGICK_TEMPORARY_PATH":path.resolve("temp"), "MAGICK_DISK_LIMIT":sizeStringToBytes("4GiB")}});
-			req.on("close", function(){stream.kill();});
-			stream.stdout.on("data", function(data){res.write(Buffer.from(data));});
-			stream.on("close", function(){res.end();});
-		}
-	} else if (pathIsFile(loc)){
-		sendError(req, res, {code:400, username:login.username, desc:"File found but invalid for thumbnail generation"});
-	} else if (pathIsDirectory(loc)){
-		sendError(req, res, {code:400, username:login.username, desc:"Directories cannot be turned into thumbnails"});
-	} else {
-		sendError(req, res, {code:400, username:login.username, desc:"Tf did you do to trigger this?"});
 	}
 });
 
@@ -178,12 +149,28 @@ server.get("/*", function(req, res){
 				username:login.username,
 				loc:loc,
 				viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
-				cache:true, filename:"folder"
+				cache:config.cacheViews, filename:"folder"
 			});
 		}
 	} else {
 		// Send file
-		res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
+		if ("thumbnail" in req.query && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
+			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
+			//if (imageSize[0]*imageSize[1]>=10000*10000){
+			//	res.sendFile(path.resolve("resources/TooBig.png"));
+			//} else {
+			res.set("Content-Type", "image/jpeg");
+			var stream=child_process.spawn(
+					"magick", [loc+"[0]", "-format", "jpeg", "-thumbnail", "512x512>", "-"],
+					{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("4GiB")}}
+				);
+			stream.stdout.on("data", function(data){res.write(Buffer.from(data));});
+			req.on("close", function(){stream.kill();});
+			stream.on("close", function(){res.end();});
+			//}
+		} else {
+			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
+		}
 	}
 });
 
@@ -211,17 +198,18 @@ function warn(text){
 // Generic filesystem
 function pathIsDirectory(loc){
 	try {
-		return fs.lstatSync(loc).isDirectory();
+		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
 	} catch {return false;}
 }
 function pathIsFile(loc){
 	try {
-		return !fs.lstatSync(loc).isDirectory();
+		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
 	} catch {return false;}
 }
 function pathExists(loc){
 	try {
-		return fs.existsSync(loc);
+		fs.statSync(loc);
+		return true
 	} catch {return false;}
 }
 function moveFile(oldLoc, newLoc){
@@ -237,7 +225,7 @@ function moveFile(oldLoc, newLoc){
 // Drive/folder
 function getDriveData(login){
 	// TODO: Make this entire script support Linux
-	return childProcess.execSync("wmic logicaldisk get name")
+	return child_process.execSync("wmic logicaldisk get name")
 		.toString().replace(/ /g, "").split(/[\n\r]+/) // Extract non-empty lines
 		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
 		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
@@ -254,15 +242,148 @@ function getFolderContents(folderLoc, login){
 	return {files:files, folders:folders};
 }
 
+
+// Login/Validation
+function hash(text, salt, type){
+	// Hash used for passwords. Hash type and salt are set in config.json
+	if (text===undefined){
+		throw new Error("Provided hashstring is undefined (the type, not a string)");
+	}
+	if (salt===undefined){salt=config.hashSalt;} // salt||=config.hashSalt triggers on salt=""
+	type||=config.hashType;
+	return crypto.createHash(type).update(text+salt).digest("hex");
+}
+function getLoginFromReq(req){
+	// If the provided login is invalid, treat it as an empty login
+	var rawReqLogin={username: req.cookies.username || "", password:req.cookies.password || ""};
+	return validateLogin(rawReqLogin) ? rawReqLogin : {username:"", password:""};
+}
+function validateLogin(login){
+	if (typeof login!="object" || !("username" in login) || !("password" in login)){
+		return false;
+	}
+	if (!(login.username in config.accounts)){
+		// Nonexistent username is automatically invalid
+		warn(`Invalid login detected. Username: ${login.username}`);
+		return false;
+	}
+	return config.accounts[login.username].passHash===hash(login.password);
+}
+function isAllowedPath(loc, login){
+	// This is easily the single most important function in this script
+	// DO NOT MESS WITH IT IN PRODUCTION
+	// EVEN IF YOU KNOW WHAT YOU'RE DOING IT'S STILL A BAD IDEA
+	// IF THERE'S A BUG SEND AN ISSUE ON THE GITHUB REPO
+	// THIS MUST FAIL: curl --insecure --path-as-is https://localhost/C:/AllowedPath/../../C:/NotAllowedPath
+	function normalize(loc){
+		return path.resolve(loc).replace(/\\/g, "/").replace(/^\//, "").toLowerCase()
+	}
+	if (!(validateLogin(login)) || loc===undefined){
+		// Need to handle the case where the empty username isn't defined, since that's what getLoginFromReq defaults to
+		// path is undefined if a .lnk file has no detected desitnation
+		return false;
+	}
+	if (loc in config.redirects){
+		return isAllowedPath(config.redirects[loc], login) && !config.accounts[login.username].deny.some(denyElem=>denyElem.toLowerCase()==loc);
+	}
+	loc=loc.replace(/\\/g, "/").replace(/^\//, "").toLowerCase();
+	locAbs=path.resolve(loc).replace(/\\/g, "/");
+	if (loc.toLowerCase()==="upload" || loc.toLowerCase()==="uploadform"){
+		// Arguably you can handle this in the allow key but that's dumb and jank
+		return config.accounts[login.username].canUpload!=false;
+	}
+	if (locAbs.startsWith(normalize(__dirname)) || locAbs==normalize(kwargs.config)){
+		return false;
+	}
+	var isAllowed=config.accounts[login.username].allow.some(function(allowElem){
+			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
+			return locAbs.startsWith(normalize(allowElem)) || normalize(allowElem).startsWith(locAbs);
+		}),
+		isDenied=config.accounts[login.username].deny.some(denyElem=>locAbs.startsWith(normalize(denyElem)));
+	// Allowing x:/y/ but disallowing x:/y/z/ works as expected
+	// Gotta say, I like how I handled checking lnk files
+	return isAllowed && !isDenied && (isLnkLoc(locAbs)?isAllowedPath(getLnkLoc(locAbs), login):true);
+}
+
+// Error handler
+function sendError(req, res, args){
+	// Got sick of doing this all over the place
+	// Todo: Put the special errors (such as the 400's in the thumbnail code) in errorDescs
+	var errorDescs={
+		403:"File/Directory is not available for this login, assuming it exists",
+		404:"File/Directory not found"
+	};
+	res.status(args.code);
+	res.render("error", {
+		code:args.code,
+		desc:args.desc || errorDescs[args.code] || "Error description not given",
+		back:req.headers.referer || "/",
+		username:args.username,
+		cache:config.cacheViews, filename:"error"
+	});
+	// Todo: Maybe log IP?
+	warn(`Error ${args.code} from ${args.username || "default user"}: ${args.desc || errorDescs[args.code]}`);
+}
+
+// LNK handler
+function getLnkLoc(lnkPath, skipValidation){
+	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
+	// Also todo: Replace LNKs entirely by using the @ system I used to use
+	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
+	if (!skipValidation && !isLnkLoc(lnkPath)){
+		return undefined
+	}
+	var lnkContents=fs.readFileSync(lnkPath).toString(),
+		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
+	try {
+		return lnkRegex.exec(lnkContents)[0].replace(/\\/g, "/");
+	} catch {
+		return undefined
+	}
+}
+function isLnkLoc(lnkPath){
+	// Honestly this comment is just here so sublime witll let me collapse the function
+	return pathIsFile(lnkPath) && path.extname(lnkPath)=="lnk" && getLnkLoc(lnkPath, true);
+}
+
+// Sizestring for uploading
+function sizeStringToBytes(sizeStr){
+	if (sizeStr==-1){
+		return Infinity;
+	}
+	if (typeof sizeStr=="number"){
+		return sizeStr;
+	}
+	var unitMap={
+			"b":1,
+			"kb":1000**1,"kib":1024**1,
+			"mb":1000**2,"mib":1024**2,
+			"gb":1000**3,"gib":1024**3,
+			"tb":1000**4,"tib":1024**4 // Because I can
+		},
+		parseRegex=/^(\d+)(([KMG]i?)?[B])$/i,
+		parsed=parseRegex.exec(sizeStr);
+	return parseInt(parsed[1])*unitMap[parsed[2].toLowerCase()];
+}
+function isValidSizeString(sizeStr){
+	try {
+		sizeStringToBytes(sizeStr);
+		return true;
+	} catch (e) {
+		return false;
+	}
+}
+
 // Config
 function getConfig(){
 	// Yeah yeah "global variables bad"
 	// Look pretty much every major function in this mess of a program needs to reference the config and it doesn't change
 	// It'd be stupider to *not* use a global variable here
-	config=JSON.parse(fs.readFileSync(kwargs.config));
+	var config=JSON.parse(fs.readFileSync(kwargs.config));
 	validateConfig(config); // Yes this is supposed to throw an error on an invalid config
+	return config;
 }
-function validateConfig(){
+function validateConfig(config){
 	// Validate redirects
 	var validViewSettings={
 		"folder":{
@@ -278,11 +399,11 @@ function validateConfig(){
 	// Validate accounts
 	for (let account in config.accounts){
 		var accountData=config.accounts[account];
-		if (accountData.passHash.length!=hash("", config).length){
-			throw new Error(`${account} has an invalid password hash length`);
+		if (accountData.passHash.length!=hash("", config.hashSalt, config.hashType).length){
+			throw new Error(`${account} has an invalid passHash length`);
 		}
 		for (let denyElem of accountData.deny){
-			if (!accountData.allow.some(allowElem=>denyElem.toLowerCase().startswith(allowElem.toLowerCase()))){
+			if (!accountData.allow.some(allowElem=>denyElem.toLowerCase().startsWith(allowElem.toLowerCase()))){
 				warn(`${account} is denied ${denyElem} despite not being allowed any of its parents`);
 			}
 		}
@@ -290,11 +411,11 @@ function validateConfig(){
 			if (accountData.canUpload!=false){
 				warn(`Default account has been granted upload permissions`);
 			}
-			if (hash("", config)!=accountData.passHash){
+			if (hash("", config.hashSalt, config.hashType)!=accountData.passHash){
 				warn(`Default account has a non-empty password`);
 			}
 		}
-		if (account!="" && hash("", config)==accountData.passHash){
+		if (account!="" && hash("", config.hashSalt, config.hashType)==accountData.passHash){
 			warn(`${account} has an empty password`);
 		}
 		if (typeof accountData.canUpload=="string"){
@@ -340,117 +461,4 @@ function validateConfig(){
 			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsKey}")`);
 		}
 	}
-}
-
-// Login/Validation
-function hash(text){
-	// Hash used for passwords. Hash type and salt are set in config.json
-	if (text===undefined){
-		throw new Error("Provided hashstring is undefined (the type, not a string)");
-	}
-	return crypto.createHash(config.hashType).update(text+config.hashSalt).digest("hex");
-}
-function getLoginFromReq(req){
-	// If the provided login is invalid, treat it as an empty login
-	var rawReqLogin={username: req.cookies.username || "", password:req.cookies.password || ""};
-	return validateLogin(rawReqLogin) ? rawReqLogin : {username:"", password:""};
-}
-function validateLogin(login){
-	if (typeof login!="object" || !("username" in login) || !("password" in login)){
-		return false;
-	}
-	if (!(login.username in config.accounts)){
-		// Nonexistent username is automatically invalid
-		warn(`Invalid login detected. Username: ${login.username}`);
-		return false;
-	}
-	return config.accounts[login.username].passHash===hash(login.password);
-}
-function isAllowedPath(pathAbs, login){
-	if (!(validateLogin(login)) || pathAbs===undefined){
-		// Need to handle the case where the empty username isn't defined, since that's what getLoginFromReq defaults to
-		// pathAbs is undefined if a .lnk file has no detected desitnation
-		return false;
-	}
-	pathAbs=pathAbs.replace(/\\/g, "/"); // Windows using \\ as a folder delimiter is stupid
-	if (pathAbs.toLowerCase()==="upload" || pathAbs.toLowerCase()==="uploadform"){
-		// Arguably you can handle this in the allow key but that's dumb and jank
-		return config.accounts[login.username].canUpload!=false;
-	}
-	if (pathAbs in config.redirects){
-		return isAllowedPath(config.redirects[pathAbs].replace(/^\//, ""), login);
-	}
-	var isAllowed=config.accounts[login.username].allow.some(function(allowElem){
-			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
-			return pathAbs.startsWith(allowElem) || allowElem.startsWith(pathAbs);
-		}),
-		isDenied=config.accounts[login.username].deny.some(denyElem=>pathAbs.startsWith(denyElem));
-	// Allowing x:/y/ but disallowing x:/y/z/ works as expected
-	// Gotta say, I like how I handled checking lnk files
-	return isAllowed && !isDenied && (isLnkLoc(pathAbs)===isAllowedPath(getLnkLoc(pathAbs), login));
-}
-
-// Error handler
-function sendError(req, res, args){
-	// Got sick of doing this all over the place
-	// Todo: Put the special errors (such as the 400's in the thumbnail code) in errorDescs
-	var errorDescs={
-		403:"File/Directory is not available for this login, assuming it exists",
-		404:"File/Directory not found"
-	};
-	res.status(args.code);
-	res.render("error", {
-		code:args.code,
-		text:args.desc || errorDescs[args.code] || "Error description not given",
-		referer:req.headers.referer,
-		username:args.username,
-		cache:true, filename:"error"
-	});
-	// Todo: Maybe log IP?
-	warn(`Error ${args.code} from ${args.username || "[empty username]"}: ${args.desc || errorDescs[args.code]}`);
-}
-
-// LNK handler
-function getLnkLoc(lnkPath, skipValidation){
-	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
-	// Also todo: Replace LNKs entirely by using the @ system I used to use
-	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
-	if (!skipValidation && !isLnkLoc(lnkPath)){
-		return undefined
-	}
-	var lnkContents=fs.readFileSync(lnkPath).toString(),
-		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
-	try {
-		return lnkRegex.exec(lnkContents)[0].replace(/\\/g, "/");
-	} catch {
-		return undefined
-	}
-}
-function isLnkLoc(lnkPath){
-	// Honestly this is just here so sublime witll let me collapse the function
-	return pathIsFile(lnkPath) && path.extname(lnkPath)=="lnk" && getLnkLoc(lnkPath, true);
-}
-
-// Sizestring for uploading
-function sizeStringToBytes(sizeStr){
-	if (sizeStr==-1){
-		return Infinity;
-	}
-	var unitMap={
-			"b":1,
-			"kb":1000**1,"kib":1024**1,
-			"mb":1000**2,"mib":1024**2,
-			"gb":1000**2,"gib":1024**3
-		},
-		parseRegex=/^(\d+)(([KMG]i?)?[B])$/i,
-		parsed=parseRegex.exec(sizeStr);
-	return parseInt(parsed[1])*unitMap[parsed[2].toLowerCase()];
-}
-function isValidSizeString(sizeStr){
-	try {
-		sizeStringToBytes(sizeStr);
-	} catch (e) {
-		return false;
-	}
-	return true;
 }

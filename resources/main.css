@@ -8,9 +8,6 @@ input{
 	box-sizing:border-box;
 	width:25%;
 }
-table{
-	width:100%;
-}
 a{
 	display:inline-block;
 	width:100%;

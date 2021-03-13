@@ -25,5 +25,6 @@
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
 	"httpsCert":"cert.pem",
-	"maxFileSize":"8MiB"
+	"maxFileSize":"8MiB",
+	"cacheViews":true
 }
