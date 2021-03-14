@@ -8,6 +8,7 @@ path=require("path");
 fs=require("fs");
 crypto=require("crypto");
 child_process=require("child_process");
+true_case_path=require("true-case-path");
 
 // == INITIALIZATION ==
 
@@ -22,7 +23,7 @@ parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad id
 kwargs=parser.parse_args();
 
 // Get and validate config
-// TODO: MAKE THIS NOT A GLOBAL VARIABLE
+absPathCache={};
 config=getConfig();
 
 // Handle -hash
@@ -60,7 +61,7 @@ server.get("/", function(req, res){
 			canUpload:isAllowedPath("uploadForm", login),
 			redirects:Object.keys(config.redirects).filter(redirect=>isAllowedPath(redirect, login)),
 			title:"Drive selection",
-			cache:config.cacheViews, filename:"drives"
+			cache:config.viewSettings.cacheViews, filename:"drives"
 		}
 	);
 });
@@ -83,7 +84,7 @@ server.post("/login", function(req, res){
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req);
 	if (isAllowedPath("uploadForm", login)){
-		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.cacheViews, filename:"uploadForm"});
+		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.viewSettings.cacheViews, filename:"uploadForm"});
 	} else {
 		sendError(req, res, {code:403, username:login.username});
 	}
@@ -105,7 +106,7 @@ server.post('/upload', function(req, res){
 					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
 					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
 				moveFile(req.file.path, filePath); // fs.renameSync failes when moving between drives
-				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:config.cacheViews, filename:"uploaded"});
+				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:config.viewSettings.cacheViews, filename:"uploaded"});
 			}
 		});
 	} else {
@@ -118,7 +119,7 @@ server.post('/upload', function(req, res){
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=req.params[0]+".lnk";
-	if (isAllowedPath(lnk)){ // Also handles if the desitnation is allowed
+	if (isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
 		res.redirect("/"+getLnkLoc(loc));
 	} else {
 		sendError(req, res, {code:403, username:login.username});
@@ -148,21 +149,23 @@ server.get("/*", function(req, res){
 				contents:getFolderContents(loc, login),
 				username:login.username,
 				loc:loc,
+				imageRegex:config.viewSettings.folder.imageRegex,
+				videoRegex:config.viewSettings.folder.videoRegex,
 				viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
-				cache:config.cacheViews, filename:"folder"
+				cache:config.viewSettings.cacheViews, filename:"folder"
 			});
 		}
 	} else {
 		// Send file
-		if ("thumbnail" in req.query && /\.a?png|jpe?g|jfif|gif|bmp$/.test(loc)){
+		if ("thumbnail" in req.query && config.viewSettings.folder.imageRegex.test(loc)){
 			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
 			//if (imageSize[0]*imageSize[1]>=10000*10000){
 			//	res.sendFile(path.resolve("resources/TooBig.png"));
 			//} else {
 			res.set("Content-Type", "image/jpeg");
-			var stream=child_process.spawn(
-					"magick", [loc+"[0]", "-format", "jpeg", "-thumbnail", "512x512>", "-"],
-					{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("4GiB")}}
+			let stream=child_process.spawn( // For some reason using let instead of var makes stream.kill work right
+					"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
+					{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("1GiB")}}
 				);
 			stream.stdout.on("data", function(data){res.write(Buffer.from(data));});
 			req.on("close", function(){stream.kill();});
@@ -197,19 +200,19 @@ function warn(text){
 
 // Generic filesystem
 function pathIsDirectory(loc){
-	try {
+	//try {
 		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
-	} catch {return false;}
+	//} catch {return false;}
 }
 function pathIsFile(loc){
-	try {
+	//try {
 		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
-	} catch {return false;}
+	//} catch {return false;}
 }
 function pathExists(loc){
 	try {
-		fs.statSync(loc);
-		return true
+		fs.lstatSync(loc);
+		return getAbsPath(loc, true)===path.resolve(loc).replace(/\\/g, "/");
 	} catch {return false;}
 }
 function moveFile(oldLoc, newLoc){
@@ -220,6 +223,29 @@ function moveFile(oldLoc, newLoc){
 		fs.copyFileSync(oldLoc, newLoc);
 		fs.rmSync(oldLoc);
 	}
+}
+function getAbsPath(loc, fixCase){
+	loc=path.resolve(loc).replace(/\\/g, "/").replace(/^\//g, "");
+	if (fixCase){
+		try{
+			if (!(loc in absPathCache) || new Date().getTime()-absPathCache[loc].time>=5000){
+				absPathCache[loc]={
+						absLoc:true_case_path.trueCasePathSync(loc).replace(/\\/g, "/"),
+						time:new Date().getTime()
+					};
+			}
+			loc=absPathCache[loc].absLoc;
+		} catch {return undefined;}
+	}
+	// if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
+	if (/^[a-z]:$/i.test(loc)){loc+="/";}
+	return loc
+}
+function isParentDirOrSelf(loc, parentLoc){
+	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
+	loc=loc.split("/").filter(x=>x!="");
+	parentLoc=parentLoc.split("/").filter(x=>x!="");
+	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
 }
 
 // Drive/folder
@@ -241,7 +267,6 @@ function getFolderContents(folderLoc, login){
 		files=contents.filter(subFolder=>pathIsFile(abs(subFolder)));
 	return {files:files, folders:folders};
 }
-
 
 // Login/Validation
 function hash(text, salt, type){
@@ -270,39 +295,25 @@ function validateLogin(login){
 	return config.accounts[login.username].passHash===hash(login.password);
 }
 function isAllowedPath(loc, login){
-	// This is easily the single most important function in this script
-	// DO NOT MESS WITH IT IN PRODUCTION
-	// EVEN IF YOU KNOW WHAT YOU'RE DOING IT'S STILL A BAD IDEA
-	// IF THERE'S A BUG SEND AN ISSUE ON THE GITHUB REPO
-	// THIS MUST FAIL: curl --insecure --path-as-is https://localhost/C:/AllowedPath/../../C:/NotAllowedPath
-	function normalize(loc){
-		return path.resolve(loc).replace(/\\/g, "/").replace(/^\//, "").toLowerCase()
-	}
-	if (!(validateLogin(login)) || loc===undefined){
-		// Need to handle the case where the empty username isn't defined, since that's what getLoginFromReq defaults to
-		// path is undefined if a .lnk file has no detected desitnation
-		return false;
-	}
-	if (loc in config.redirects){
-		return isAllowedPath(config.redirects[loc], login) && !config.accounts[login.username].deny.some(denyElem=>denyElem.toLowerCase()==loc);
-	}
-	loc=loc.replace(/\\/g, "/").replace(/^\//, "").toLowerCase();
-	locAbs=path.resolve(loc).replace(/\\/g, "/");
-	if (loc.toLowerCase()==="upload" || loc.toLowerCase()==="uploadform"){
-		// Arguably you can handle this in the allow key but that's dumb and jank
-		return config.accounts[login.username].canUpload!=false;
-	}
-	if (locAbs.startsWith(normalize(__dirname)) || locAbs==normalize(kwargs.config)){
-		return false;
-	}
-	var isAllowed=config.accounts[login.username].allow.some(function(allowElem){
+	// This is easily the single most important (and most jank) function in this program
+	// Note to self: curl --insecure --path-as-is https://localhost/C:/AllowedPath/../../C:/NotAllowedPath
+	function _isAllowed(absLoc, login){
+		return config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
-			return locAbs.startsWith(normalize(allowElem)) || normalize(allowElem).startsWith(locAbs);
-		}),
-		isDenied=config.accounts[login.username].deny.some(denyElem=>locAbs.startsWith(normalize(denyElem)));
+			return isParentDirOrSelf(absLoc, getAbsPath(allowElem)) || isParentDirOrSelf(getAbsPath(allowElem), absLoc);
+		});
+	}
+	function _isDenied(absLoc, login){
+		return config.accounts[login.username].deny.some(denyElem=>isParentDirOrSelf(absLoc, getAbsPath(denyElem)));
+	}
+	if (!validateLogin(login) || loc===undefined){return false;}
+	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
+	if (loc in config.redirects){return isAllowedPath(config.redirects[loc].replace(/^\//, ""), login) && !_isDenied(loc, login);}
 	// Allowing x:/y/ but disallowing x:/y/z/ works as expected
 	// Gotta say, I like how I handled checking lnk files
-	return isAllowed && !isDenied && (isLnkLoc(locAbs)?isAllowedPath(getLnkLoc(locAbs), login):true);
+	absLoc=getAbsPath(loc);
+	if (isParentDirOrSelf(absLoc, getAbsPath(__dirname)) || absLoc==getAbsPath(kwargs.config)){return false;}
+	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
 }
 
 // Error handler
@@ -319,7 +330,7 @@ function sendError(req, res, args){
 		desc:args.desc || errorDescs[args.code] || "Error description not given",
 		back:req.headers.referer || "/",
 		username:args.username,
-		cache:config.cacheViews, filename:"error"
+		cache:config.viewSettings.cacheViews, filename:"error"
 	});
 	// Todo: Maybe log IP?
 	warn(`Error ${args.code} from ${args.username || "default user"}: ${args.desc || errorDescs[args.code]}`);
@@ -343,7 +354,7 @@ function getLnkLoc(lnkPath, skipValidation){
 }
 function isLnkLoc(lnkPath){
 	// Honestly this comment is just here so sublime witll let me collapse the function
-	return pathIsFile(lnkPath) && path.extname(lnkPath)=="lnk" && getLnkLoc(lnkPath, true);
+	return pathIsFile(lnkPath) && path.extname(lnkPath)==".lnk" && getLnkLoc(lnkPath, true);
 }
 
 // Sizestring for uploading
@@ -361,9 +372,9 @@ function sizeStringToBytes(sizeStr){
 			"gb":1000**3,"gib":1024**3,
 			"tb":1000**4,"tib":1024**4 // Because I can
 		},
-		parseRegex=/^(\d+)(([KMG]i?)?[B])$/i,
+		parseRegex=/^(\d+)(([KMGT]i?)?[B])$/i,
 		parsed=parseRegex.exec(sizeStr);
-	return parseInt(parsed[1])*unitMap[parsed[2].toLowerCase()];
+	return parseFloat(parsed[1])*unitMap[parsed[2].toLowerCase()];
 }
 function isValidSizeString(sizeStr){
 	try {
@@ -403,7 +414,7 @@ function validateConfig(config){
 			throw new Error(`${account} has an invalid passHash length`);
 		}
 		for (let denyElem of accountData.deny){
-			if (!accountData.allow.some(allowElem=>denyElem.toLowerCase().startsWith(allowElem.toLowerCase()))){
+			if (!accountData.allow.some(allowElem=>isParentDirOrSelf(denyElem, allowElem))){
 				warn(`${account} is denied ${denyElem} despite not being allowed any of its parents`);
 			}
 		}
@@ -419,7 +430,7 @@ function validateConfig(config){
 			warn(`${account} has an empty password`);
 		}
 		if (typeof accountData.canUpload=="string"){
-			if (!pathExists(path.resolve(accountData.canUpload))){
+			if (!pathExists(accountData.canUpload)){
 				throw new Error(`${account}'s upload path has been set to a nonexistent location`);
 			}
 			if (!pathIsDirectory(accountData.canUpload)){ // pathIsDirectory is used for clarity
@@ -461,4 +472,7 @@ function validateConfig(config){
 			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsKey}")`);
 		}
 	}
+	// == PARSING ==
+	config.viewSettings.folder.imageRegex=new RegExp(config.viewSettings.folder.imageRegex);
+	config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
 }

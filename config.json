@@ -14,9 +14,12 @@
 		}
 	},
 	"viewSettings":{
+		"cacheViews":true,
 		"folder":{
 			"imageMode":"link",
-			"videoMode":"link"
+			"imageRegex":"\\.a?png|jpe?g|jfif|gif|bmp$",
+			"videoMode":"link",
+			"videoRegex":"\\.(mp4|mov|webm)$"
 		}
 	},
 	"defaultUploadLoc":"./files",
@@ -25,6 +28,5 @@
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
 	"httpsCert":"cert.pem",
-	"maxFileSize":"8MiB",
-	"cacheViews":true
+	"maxFileSize":"50MiB"
 }

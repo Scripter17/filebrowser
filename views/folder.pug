@@ -24,7 +24,7 @@ body(view="folder" username=username)
 		a(href=folder class="folder")=folder
 		br
 	for file in contents.files
-		if /\.(a?png|jpe?g|gif)$/.test(file)
+		if imageRegex.test(file)
 			a(href=file class="file image "+viewSettings.folder.imageMode)
 				if viewSettings.folder.imageMode=="embed"
 					img(src=file alt=file)
@@ -32,7 +32,7 @@ body(view="folder" username=username)
 					img(src=file+"?thumbnail" alt=file)
 				else
 					=file
-		else if /\.(mp4|mov|webm)$/.test(file)
+		else if videoRegex.test(file)
 			a(href=file class="file video "+viewSettings.folder.videoMode)
 				if viewSettings.folder.videoMode=="embed"
 					video(controls class="file video embed"): source(src=file)
