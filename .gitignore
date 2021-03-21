@@ -104,6 +104,6 @@ dist
 .tern-port
 
 # Why yes, I use this Git repo as my personal instal
-debug-config.json
+debug-*
 *.pem
 files

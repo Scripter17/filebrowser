@@ -17,9 +17,9 @@
 		"cacheViews":true,
 		"folder":{
 			"imageMode":"link",
-			"imageRegex":"\\.a?png|jpe?g|jfif|gif|bmp$",
+			"imageRegex":"\\.(a?png|jpe?g|jfif|gif|bmp)$",
 			"videoMode":"link",
-			"videoRegex":"\\.(mp4|mov|webm)$"
+			"videoRegex":"\\.(mp4|mov|webm|mkv)$"
 		}
 	},
 	"defaultUploadLoc":"./files",

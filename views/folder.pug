@@ -17,14 +17,15 @@ body(view="folder" username=username)
 			input(type="submit" value="Login")
 	br
 	span#loc=loc
-	br
-	a(href="..")=".."
+	if !hideBack
+		br
+		a(href="..")=".."
 	hr
 	for folder in contents.folders
 		a(href=folder class="folder")=folder
 		br
 	for file in contents.files
-		if imageRegex.test(file)
+		if viewSettings.folder.imageRegex.test(file)
 			a(href=file class="file image "+viewSettings.folder.imageMode)
 				if viewSettings.folder.imageMode=="embed"
 					img(src=file alt=file)
@@ -32,7 +33,7 @@ body(view="folder" username=username)
 					img(src=file+"?thumbnail" alt=file)
 				else
 					=file
-		else if videoRegex.test(file)
+		else if viewSettings.folder.videoRegex.test(file)
 			a(href=file class="file video "+viewSettings.folder.videoMode)
 				if viewSettings.folder.videoMode=="embed"
 					video(controls class="file video embed"): source(src=file)

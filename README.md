@@ -34,9 +34,12 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 		}
 	},
 	"viewSettings":{
+		"cacheViews":true,
 		"folder":{
 			"imageMode":"link",
-			"videoMode":"link"
+			"imageRegex":"\\.a?png|jpe?g|jfif|gif|bmp$",
+			"videoMode":"link",
+			"videoRegex":"\\.(mp4|mov|webm)$"
 		}
 	},
 	"defaultUploadLoc":"./files",
@@ -45,7 +48,7 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
 	"httpsCert":"cert.pem",
-	"maxFileSize":"8MiB"
+	"maxFileSize":"50MiB"
 }
 ```
 
@@ -58,14 +61,16 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `accounts[account].canUpload`: Either `true` to allow uploading to `defaultUploadLoc` or a string to specify a per-user upload location. Should be kept as `false` for accounts other than the admin one
 - `accounts[account].viewSettings` (optional): A per-user override for the `viewSettings` key
 - `viewSettings.folder.imageMode`: Either `"link"`, `"embed"`, or `"thumbnail"`. Works as expected (thumbnails are at most 512x512 and much less resource/network intenseive than `embed`)
+- `viewSettings.folder.imageRegex`: A Regular Expression string to check if a file path is an image
 - `viewSettings.folder.videoMode`: Either `"link"` or `"embed"`. Works the same as `viewSettings.folder.imageMode` except for videos
+- `viewSettings.folder.videoRegex`: A Regular Expression string to check if a file path is an video
 - `defaultUplodLoc`: The default path for uploaded files to be placed into. Can be overriden on a per-user basis in `accounts[account].canUpload`
 - `hashType`: Any hash name that Node's crpyto package can handle
 - `hashSalt`: A (preferably long) string of characters to help defend against dictionary attacks if the config file or a `accounts[account].passHash` is ever leaked
 - `useHTTPS`: It, well, it enabled HTTPS when `true`
 - `httpsKey`: The path to an HTTPS key (only tested with .pem files)
 - `httpsCery`: The path to an HTTPS cert (only tested with .pem files)
-- `maxFileSize`: Either `-1` for infinite or a number followed by `"B"`, `"KB"`, `"KiB"`, `"MB"`, `"MiB"`, `"GB"`, or `"GiB"`
+- `maxFileSize`: Either `-1` for infinite or a number followed by `"B"`, `"KB"`, `"KiB"`, `"MB"`, `"MiB"`, `"GB"`, `"GiB"`, `"TB"`, or `"TiB"` (case insensitive)
 
 # License
 

@@ -44,7 +44,7 @@ server.set("view engine", "pug");
 // Upload handler
 // TODO: Per-user file size limits
 uploadHandler=multer({
-	dest:"./files/",
+	dest:config.defaultUploadLoc,
 	fileFilter:function(req, file, callback){
 		// It works but the docs don't explain why
 		callback(null, isAllowedPath("upload", getLoginFromReq(req)));
@@ -54,16 +54,27 @@ uploadHandler=multer({
 
 // Drive selection / Login screen
 server.get("/", function(req, res){
-	var login=getLoginFromReq(req);
-	res.render("drives", {
+	var login=getLoginFromReq(req),
+		rawLoc=req.params[0],
+		loc=getLocFromReq(req);
+	if (loc!=""){
+		res.render("folder", {
+			contents:getFolderContents(req),
+			username:login.username, loc:rawLoc,
+			viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
+			hideBack:true,
+			cache:config.viewSettings.cacheViews, filename:"folder"
+		});
+	} else {
+		res.render("drives", {
 			drives:getDriveData(login),
 			username:login.username,
 			canUpload:isAllowedPath("uploadForm", login),
 			redirects:Object.keys(config.redirects).filter(redirect=>isAllowedPath(redirect, login)),
 			title:"Drive selection",
 			cache:config.viewSettings.cacheViews, filename:"drives"
-		}
-	);
+		});
+	}
 });
 
 // Login handler
@@ -71,6 +82,7 @@ server.post("/login", function(req, res){
 	var login=req.body;
 	if (!validateLogin(login)){
 		// Don't want to set an invalid login
+		warn(`Invalid login attempt: ${JSON.stringify({username:login.username, password:login.password})}`)
 		login={username:"", password:""};
 	}
 	// Set login cookies for 1 week
@@ -86,7 +98,7 @@ server.get("/uploadForm", function(req, res){
 	if (isAllowedPath("uploadForm", login)){
 		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.viewSettings.cacheViews, filename:"uploadForm"});
 	} else {
-		sendError(req, res, {code:403, username:login.username});
+		sendError(req, res, {code:403, username:login.username, loc:"uploadForm"});
 	}
 });
 
@@ -96,11 +108,11 @@ server.post('/upload', function(req, res){
 	if (isAllowedPath("upload", login)){
 		uploadHandler(req, res, function (err){
 			if (err instanceof multer.MulterError){ // TODO: Detect only file too large errors
-				sendError(req, res, {code:413, username:login.username, desc:"File too large"});
+				sendError(req, res, {code:413, username:login.username, desc:"File too large", loc:"upload"});
 			} else if (req.file==undefined){
-				sendError(req, res, {code:400, username:login.username, desc:"No file given"});
+				sendError(req, res, {code:400, username:login.username, desc:"No file given", loc:"upload"});
 			} else if (err){
-				sendError(req, res, {code:500, username:login.username, desc:"Unknown error handling file upload"});
+				sendError(req, res, {code:500, username:login.username, desc:"Unknown error handling file upload", loc:"upload"});
 			} else {
 				var uploadFolder=config.accounts[login.username].canUpload,
 					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
@@ -110,7 +122,7 @@ server.post('/upload', function(req, res){
 			}
 		});
 	} else {
-		sendError(req, res, {code:403, username:login.username});
+		sendError(req, res, {code:403, username:login.usernam, loc:"upload"});
 	}
 });
 
@@ -122,7 +134,7 @@ server.get("/**.lnk", function(req, res){
 	if (isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
 		res.redirect("/"+getLnkLoc(loc));
 	} else {
-		sendError(req, res, {code:403, username:login.username});
+		sendError(req, res, {code:403, username:login.username, loc:loc});
 	}
 });
 
@@ -130,28 +142,27 @@ server.get("/**.lnk", function(req, res){
 server.get("/*", function(req, res){
 	var time=new Date().getTime(),
 		login=getLoginFromReq(req),
-		loc=req.params[0];
+		rawLoc=req.params[0],
+		loc=getLocFromReq(req);
 	if (!isAllowedPath(loc, login)){
 		// Login invalid; Return 403
-		sendError(req, res, {code:403, username:login.username});
+		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
 	} else if (Object.keys(config.redirects).indexOf(loc)!=-1){
 		// Handle redirects
 		res.redirect(config.redirects[loc]);
 	} else if (!pathExists(loc)){
 		// File/dir not found
-		sendError(req, res, {code:404, username:login.username});
+		sendError(req, res, {code:404, username:login.username, loc:rawLoc});
 	} else if (pathIsDirectory(loc)){
 		// Send directory view
 		if (!loc.endsWith("/")){
 			res.redirect("/"+loc+"/");
 		} else {
 			res.render("folder", {
-				contents:getFolderContents(loc, login),
-				username:login.username,
-				loc:loc,
-				imageRegex:config.viewSettings.folder.imageRegex,
-				videoRegex:config.viewSettings.folder.videoRegex,
+				contents:getFolderContents(req),
+				username:login.username, loc:rawLoc,
 				viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
+				hideBack:false,
 				cache:config.viewSettings.cacheViews, filename:"folder"
 			});
 		}
@@ -212,7 +223,9 @@ function pathIsFile(loc){
 function pathExists(loc){
 	try {
 		fs.lstatSync(loc);
-		return getAbsPath(loc, true)===path.resolve(loc).replace(/\\/g, "/");
+		var resLoc=path.resolve(loc).replace(/\\/g, "/");
+		if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
+		return getAbsPath(loc, true)===resLoc;
 	} catch {return false;}
 }
 function moveFile(oldLoc, newLoc){
@@ -225,6 +238,7 @@ function moveFile(oldLoc, newLoc){
 	}
 }
 function getAbsPath(loc, fixCase){
+	if (typeof loc=="object"){loc=path.resolve(...loc);}
 	loc=path.resolve(loc).replace(/\\/g, "/").replace(/^\//g, "");
 	if (fixCase){
 		try{
@@ -237,12 +251,14 @@ function getAbsPath(loc, fixCase){
 			loc=absPathCache[loc].absLoc;
 		} catch {return undefined;}
 	}
+	try {fs.lstatSync(loc);} catch {return undefined;}
 	// if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
-	if (/^[a-z]:$/i.test(loc)){loc+="/";}
+	if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
 	return loc
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
+	//console.log(loc, parentLoc)
 	loc=loc.split("/").filter(x=>x!="");
 	parentLoc=parentLoc.split("/").filter(x=>x!="");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
@@ -256,15 +272,17 @@ function getDriveData(login){
 		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
 		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
 }
-function getFolderContents(folderLoc, login){
+function getFolderContents(req){
+	var login=getLoginFromReq(req),
+		folderLoc=getLocFromReq(req);
 	function abs(subFolder){
 		return path.resolve(folderLoc, subFolder);
 	}
-	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
-		.filter(subFolder=>pathExists(abs(subFolder))) // "C:/System Volume Information" doesn't exist
-		.filter(subFolder=>isAllowedPath(abs(subFolder), login)), // Don't let people see the stuff they can't access
-		folders=contents.filter(subFolder=>pathIsDirectory(abs(subFolder))).map(x=>x+"/"),
-		files=contents.filter(subFolder=>pathIsFile(abs(subFolder)));
+	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder);
+	contents=contents.filter(subFolder=>pathExists(getAbsPath([folderLoc, subFolder]))); // "C:/System Volume Information" doesn't exist
+	contents=contents.filter(subFolder=>isAllowedPath(getAbsPath([folderLoc, subFolder]), login)); // Don't let people see the stuff they can't access
+	var folders=contents.filter(subFolder=>pathIsDirectory(getAbsPath([folderLoc, subFolder]))).map(x=>x+"/"),
+		files=contents.filter(subFolder=>pathIsFile(getAbsPath([folderLoc, subFolder])));
 	return {files:files, folders:folders};
 }
 
@@ -294,13 +312,23 @@ function validateLogin(login){
 	}
 	return config.accounts[login.username].passHash===hash(login.password);
 }
+function getLocFromReq(req, suffix){
+	var loc=(req.params[0]||"")+(suffix||"");
+	if (config.basePath==""){
+		return loc;
+	} else {
+		loc=getAbsPath([config.basePath, loc]);
+		if (loc===undefined || !isParentDirOrSelf(loc, config.basePath)){loc="";}
+		return loc;
+	}
+}
 function isAllowedPath(loc, login){
 	// This is easily the single most important (and most jank) function in this program
 	// Note to self: curl --insecure --path-as-is https://localhost/C:/AllowedPath/../../C:/NotAllowedPath
 	function _isAllowed(absLoc, login){
 		return config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
-			return isParentDirOrSelf(absLoc, getAbsPath(allowElem)) || isParentDirOrSelf(getAbsPath(allowElem), absLoc);
+			return isParentDirOrSelf(absLoc, allowElem&&getAbsPath(allowElem)) || isParentDirOrSelf(allowElem&&getAbsPath(allowElem), absLoc);
 		});
 	}
 	function _isDenied(absLoc, login){
@@ -333,7 +361,7 @@ function sendError(req, res, args){
 		cache:config.viewSettings.cacheViews, filename:"error"
 	});
 	// Todo: Maybe log IP?
-	warn(`Error ${args.code} from ${args.username || "default user"}: ${args.desc || errorDescs[args.code]}`);
+	warn(`Error ${args.code} from ${args.username || "default user"}: ${args.desc || errorDescs[args.code]} (${args.loc || "unknown loc"})`);
 }
 
 // LNK handler
@@ -387,11 +415,8 @@ function isValidSizeString(sizeStr){
 
 // Config
 function getConfig(){
-	// Yeah yeah "global variables bad"
-	// Look pretty much every major function in this mess of a program needs to reference the config and it doesn't change
-	// It'd be stupider to *not* use a global variable here
 	var config=JSON.parse(fs.readFileSync(kwargs.config));
-	validateConfig(config); // Yes this is supposed to throw an error on an invalid config
+	config=validateConfig(config); // Yes this is supposed to throw an error on an invalid config
 	return config;
 }
 function validateConfig(config){
@@ -402,6 +427,12 @@ function validateConfig(config){
 			"videoMode": ["link", "embed"]
 		}
 	};
+	try {
+		child_process.spawnSync("where magick");
+		var magickInstalled=true;
+	} catch {
+		var magickInstalled=false;
+	}
 	for (let redirect in config.redirects){
 		if (/^[a-z\d]*:\/[^\/]/i.test(config.redirects[redirect])){
 			throw new Error(`Redirect "${redirect}" redirects to invalid path`);
@@ -433,7 +464,7 @@ function validateConfig(config){
 			if (!pathExists(accountData.canUpload)){
 				throw new Error(`${account}'s upload path has been set to a nonexistent location`);
 			}
-			if (!pathIsDirectory(accountData.canUpload)){ // pathIsDirectory is used for clarity
+			if (!pathIsDirectory(accountData.canUpload)){
 				throw new Error(`${account}'s upload path is not a directory`);
 			}
 		}
@@ -441,6 +472,9 @@ function validateConfig(config){
 			for (let setting in validViewSettings[view]){
 				if (!("viewSettings" in accountData) || !(view in accountData.viewSettings) || !(setting in accountData.viewSettings[view])){
 					continue;
+				}
+				if (view=="folder" && setting=="imageMode" && accountData.viewSettings[view][setting]=="thumbnail" && !magickInstalled){
+					throw new Error(`${account}'s viewSettings.folder.imageMode is set to thumbnail depite imageMagick not being installed`)
 				}
 				if (validViewSettings[view][setting].indexOf(accountData.viewSettings[view][setting])==-1){
 					throw new Error(`${account}'s viewSettings.${view}.${setting} has an invalid value of "${accountData.viewSettings[view][setting]}"`);
@@ -453,8 +487,18 @@ function validateConfig(config){
 			if (validViewSettings[view][setting].indexOf(config.viewSettings[view][setting])==-1){
 				throw new Error(`viewSettings.${view}.${setting} has an invalid value of "${config.viewSettings[view][setting]}"`);
 			}
+			if (view=="folder" && setting=="imageMode" && config.viewSettings[view][setting]=="thumbnail" && !magickInstalled){
+				throw new Error(`viewSettings.${view}.${setting} is set to thumbnail despite imageMagick not being installed`);
+			}
 		}
 	}
+	if (!pathExists(config.defaultUploadLoc)){
+		throw new Error(`Default upload path has been set to a nonexistent location`);
+	}
+	if (!pathIsDirectory(config.defaultUploadLoc)){
+		throw new Error(`Default upload path is not a directory`);
+	}
+
 	// Validate hashSalt
 	if (config.hashSalt.length<8){
 		// Should this be an error?
@@ -475,4 +519,5 @@ function validateConfig(config){
 	// == PARSING ==
 	config.viewSettings.folder.imageRegex=new RegExp(config.viewSettings.folder.imageRegex);
 	config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
+	return config;
 }
