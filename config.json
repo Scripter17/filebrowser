@@ -24,9 +24,10 @@
 	},
 	"defaultUploadLoc":"./files",
 	"hashType":"sha256",
-	"hashSalt":"",
+	"hashSalt":"Wgåê6µ8Èª©mÕ÷8qupÇð½\"MèuÀ%MÝj=ú\\Ò³×·)7']2S±ÆÙ¾óÕ]XPÑúã\\ÙÅaäÈß,úäAF\\y6à<æÐ/@úï»yt>@8âðgÖ·ºþõY~R$ÓõÛÎ]ßCþKïès.%6·=êb*T_}ß`Ys+tÔiïì",
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
 	"httpsCert":"cert.pem",
-	"maxFileSize":"50MiB"
+	"maxFileSize":"50MiB",
+	"basePath":""
 }

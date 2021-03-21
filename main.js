@@ -61,7 +61,7 @@ server.get("/", function(req, res){
 		res.render("folder", {
 			contents:getFolderContents(req),
 			username:login.username, loc:rawLoc,
-			viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
+			viewSettings:getViewSettingsFromLogin(login),
 			hideBack:true,
 			cache:config.viewSettings.cacheViews, filename:"folder"
 		});
@@ -130,7 +130,7 @@ server.post('/upload', function(req, res){
 // TODO: Make optional
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
-		loc=req.params[0]+".lnk";
+		loc=getLocFromReq(req, ".lnk");
 	if (isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
 		res.redirect("/"+getLnkLoc(loc));
 	} else {
@@ -144,7 +144,7 @@ server.get("/*", function(req, res){
 		login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req);
-	if (!isAllowedPath(loc, login)){
+	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
 	} else if (Object.keys(config.redirects).indexOf(loc)!=-1){
@@ -161,7 +161,7 @@ server.get("/*", function(req, res){
 			res.render("folder", {
 				contents:getFolderContents(req),
 				username:login.username, loc:rawLoc,
-				viewSettings:Object.assign(config.viewSettings, config.accounts[login.username].viewSettings || {}),
+				viewSettings:getViewSettingsFromLogin(login),
 				hideBack:false,
 				cache:config.viewSettings.cacheViews, filename:"folder"
 			});
@@ -339,6 +339,7 @@ function isAllowedPath(loc, login){
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc].replace(/^\//, ""), login) && !_isDenied(loc, login);}
 	// Allowing x:/y/ but disallowing x:/y/z/ works as expected
 	// Gotta say, I like how I handled checking lnk files
+	console.log(loc)
 	absLoc=getAbsPath(loc);
 	if (isParentDirOrSelf(absLoc, getAbsPath(__dirname)) || absLoc==getAbsPath(kwargs.config)){return false;}
 	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
@@ -520,4 +521,8 @@ function validateConfig(config){
 	config.viewSettings.folder.imageRegex=new RegExp(config.viewSettings.folder.imageRegex);
 	config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
 	return config;
+}
+function getViewSettingsFromLogin(login){
+	console.log(config.accounts[login.username], (config.accounts[login.username] || {viewsettings:undefined}).viewSettings, (config.accounts[login.username] || {viewsettings:undefined}).viewSettings || {})
+	return Object.assign(config.viewSettings, (config.accounts[login.username] || {viewsettings:undefined}).viewSettings || {});
 }
