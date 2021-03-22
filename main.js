@@ -258,7 +258,6 @@ function getAbsPath(loc, fixCase){
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
-	//console.log(loc, parentLoc)
 	loc=loc.split("/").filter(x=>x!="");
 	parentLoc=parentLoc.split("/").filter(x=>x!="");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
@@ -328,6 +327,7 @@ function isAllowedPath(loc, login){
 	function _isAllowed(absLoc, login){
 		return config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
+			if (allowElem.endsWith("/")!=pathIsDirectory(allowElem)){return false;}
 			return isParentDirOrSelf(absLoc, allowElem&&getAbsPath(allowElem)) || isParentDirOrSelf(allowElem&&getAbsPath(allowElem), absLoc);
 		});
 	}
@@ -339,7 +339,6 @@ function isAllowedPath(loc, login){
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc].replace(/^\//, ""), login) && !_isDenied(loc, login);}
 	// Allowing x:/y/ but disallowing x:/y/z/ works as expected
 	// Gotta say, I like how I handled checking lnk files
-	console.log(loc)
 	absLoc=getAbsPath(loc);
 	if (isParentDirOrSelf(absLoc, getAbsPath(__dirname)) || absLoc==getAbsPath(kwargs.config)){return false;}
 	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
@@ -511,10 +510,10 @@ function validateConfig(config){
 	}
 	if (config.useHTTPS){
 		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
-			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsKey}")`);
+			throw new Error(`Nonexistent/non-file httpsKey provided ("${config.httpsKey}")`);
 		}
-		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
-			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsKey}")`);
+		if (!pathExists(config.httpsCert) || !pathIsFile(config.httpsCert)){
+			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsCert}")`);
 		}
 	}
 	// == PARSING ==
@@ -523,6 +522,5 @@ function validateConfig(config){
 	return config;
 }
 function getViewSettingsFromLogin(login){
-	console.log(config.accounts[login.username], (config.accounts[login.username] || {viewsettings:undefined}).viewSettings, (config.accounts[login.username] || {viewsettings:undefined}).viewSettings || {})
 	return Object.assign(config.viewSettings, (config.accounts[login.username] || {viewsettings:undefined}).viewSettings || {});
 }
