@@ -17,11 +17,13 @@ parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
 	add_help:true
 });
-parser.add_argument("-config", "-c", {help:"Set config file", metavar:"config", default:"config.json"});
+parser.add_argument("-config", {help:"Set config file", metavar:"config", default:"config.json"});
 parser.add_argument("-hash", {help:"Calculate account password hash", metavar:"password"});
-parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad idea)", action:"store_true"});
+parser.add_argument("-no-warn", {help:"Disable warnings (probably a bad idea)", action:"store_true"});
+parser.add_argument("-hard-warn", {help:"Throw errors instead of warnings (also probably a bad idea)", action:"store_true"});
+parser.add_argument("-log-reqs", {help:"Log every request made by any user", action:"store_true"});
 kwargs=parser.parse_args();
-
+console.log(kwargs)
 // Get and validate config
 //absPathCache={};
 config=getConfig();
@@ -57,6 +59,7 @@ server.get("/", function(req, res){
 	var login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req);
+	if (kwargs.log_reqs){console.log(`Request for / by ${login.username||"default user"} at ${req.ip}`);}
 	if (loc!=""){
 		res.render("folder", {
 			contents:getFolderContents(req),
@@ -80,6 +83,7 @@ server.get("/", function(req, res){
 // Login handler
 server.post("/login", function(req, res){
 	var login=req.body;
+	if (kwargs.log_reqs){console.log(`Login request issued for ${login.username||"default user"} at ${req.ip}`);}
 	if (!validateLogin(login)){
 		// Don't want to set an invalid login
 		warn(`Invalid login attempt: ${JSON.stringify({username:login.username, password:login.password})}`)
@@ -95,6 +99,7 @@ server.post("/login", function(req, res){
 // Upload form
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req);
+	if (kwargs.log_reqs){console.log(`Upload form loaded by ${login.username||"default user"} at ${req.ip}`);}
 	if (isAllowedPath("uploadForm", login)){
 		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.viewSettings.cacheViews, filename:"uploadForm"});
 	} else {
@@ -105,6 +110,7 @@ server.get("/uploadForm", function(req, res){
 // Upload handler
 server.post('/upload', function(req, res){
 	var login=getLoginFromReq(req);
+	if (kwargs.log_reqs){console.log(`Upload issued by ${login.username||"default user"} at ${req.ip}`);}
 	if (isAllowedPath("upload", login)){
 		uploadHandler(req, res, function (err){
 			if (err instanceof multer.MulterError){ // TODO: Detect only file too large errors
@@ -131,6 +137,7 @@ server.post('/upload', function(req, res){
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req, ".lnk");
+	if (kwargs.log_reqs){console.log(`LNK file (${loc}) loaded by ${login.username||"default user"} at ${req.ip}`);}
 	if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
 		sendError(req, res, {code:403, username:login.username, loc:loc});
 	} else {
@@ -144,6 +151,7 @@ server.get("/*", function(req, res){
 		login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req);
+	if (kwargs.log_reqs){console.log(`Path "${loc}" loaded by by ${login.username||"default user"} at ${req.ip}`);}
 	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
@@ -169,6 +177,7 @@ server.get("/*", function(req, res){
 	} else {
 		// Send file
 		if ("thumbnail" in req.query && config.viewSettings.folder.imageRegex.test(loc)){
+			//if (kwargs.log_reqs){console.log(`Thumbnail generated for "${loc}" by ${login.username||"default user"} at ${req.ip}`);}
 			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
 			//if (imageSize[0]*imageSize[1]>=10000*10000){
 			//	res.sendFile(path.resolve("resources/TooBig.png"));
@@ -202,7 +211,10 @@ if (config.useHTTPS){
 // == FUNCTIONS ==
 // Meta
 function warn(text){
-	if (!kwargs.noWarn){
+	if (kwargs.hard_warn){
+		throw new Error("Warning issued with -hard-warn enabled");
+	}
+	if (!kwargs.no_warn){
 		console.warn(text);
 		return true;
 	}
@@ -255,12 +267,14 @@ function getAbsPath(loc, fixCase){
 		//try {fs.lstatSync(loc);} catch {return undefined;}
 		// if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
 		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
-		return loc
-	} catch {return undefined;}
+		return loc;
+	} catch {return null;}
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
-	if (loc===undefined || parentLoc===undefined){return false;}
+	var ln=loc===null, pln=parentLoc===null;
+	if (loc===null){warn(`Null passed into isParentDirOrSelf (${ln?"loc":""}${ln&&pln?" & ":""}${pln?"parentLoc":""})`);}
+	if (ln || pln){return false;}
 	loc=loc.split("/").filter(x=>x!="");
 	parentLoc=parentLoc.split("/").filter(x=>x!="");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
@@ -302,6 +316,7 @@ function getLoginFromReq(req){
 }
 function validateLogin(login){
 	if (typeof login!="object" || !("username" in login) || !("password" in login)){
+		warn("Invalid login passed into validateLogin")
 		return false;
 	}
 	if (!(login.username in config.accounts)){
@@ -368,7 +383,7 @@ function getLnkLoc(lnkPath, skipValidation, cutBase){
 	// Also todo: Replace LNKs entirely by using the @ system I used to use
 	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
 	if (!skipValidation && !isLnkLoc(lnkPath)){
-		return undefined
+		return null
 	}
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
 		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
@@ -380,7 +395,7 @@ function getLnkLoc(lnkPath, skipValidation, cutBase){
 		}
 		return loc;
 	} catch {
-		return undefined
+		return null
 	}
 }
 function isLnkLoc(lnkPath){
