@@ -260,6 +260,7 @@ function getAbsPath(loc, fixCase){
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
+	if (loc===undefined || parentLoc===undefined){return false;}
 	loc=loc.split("/").filter(x=>x!="");
 	parentLoc=parentLoc.split("/").filter(x=>x!="");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
