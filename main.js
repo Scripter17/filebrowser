@@ -23,7 +23,7 @@ parser.add_argument("-no-warn", "-w", {help:"Disable warnings (probably a bad id
 kwargs=parser.parse_args();
 
 // Get and validate config
-absPathCache={};
+//absPathCache={};
 config=getConfig();
 
 // Handle -hash
@@ -131,10 +131,10 @@ server.post('/upload', function(req, res){
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req, ".lnk");
-	if (isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
-		res.redirect("/"+getLnkLoc(loc));
-	} else {
+	if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
 		sendError(req, res, {code:403, username:login.username, loc:loc});
+	} else {
+		res.redirect("/"+getLnkLoc(loc, false, true));
 	}
 });
 
@@ -238,23 +238,25 @@ function moveFile(oldLoc, newLoc){
 	}
 }
 function getAbsPath(loc, fixCase){
-	if (typeof loc=="object"){loc=path.resolve(...loc);}
-	loc=path.resolve(loc).replace(/\\/g, "/").replace(/^\//g, "");
-	if (fixCase){
-		try{
-			if (!(loc in absPathCache) || new Date().getTime()-absPathCache[loc].time>=5000){
-				absPathCache[loc]={
-						absLoc:true_case_path.trueCasePathSync(loc).replace(/\\/g, "/"),
-						time:new Date().getTime()
-					};
-			}
-			loc=absPathCache[loc].absLoc;
-		} catch {return undefined;}
-	}
-	try {fs.lstatSync(loc);} catch {return undefined;}
-	// if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
-	if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
-	return loc
+	if (loc[0]=="/" || loc[0]=="\\"){console.log(loc)}
+	if (typeof loc!="object"){loc=[loc];}
+	loc=path.resolve(...loc).replace(/\\/g, "/").replace(/^\//g, "");
+	try{
+		if (fixCase){
+				/*if (!(loc in absPathCache) || new Date().getTime()-absPathCache[loc].time>=5000){
+					absPathCache[loc]={
+							absLoc:true_case_path.trueCasePathSync(loc).replace(/\\/g, "/"),
+							time:new Date().getTime()
+						};
+				}
+				loc=absPathCache[loc].absLoc;*/
+				loc=true_case_path.trueCasePathSync(loc).replace(/\\/g, "/");
+		}
+		//try {fs.lstatSync(loc);} catch {return undefined;}
+		// if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
+		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
+		return loc
+	} catch {return undefined;}
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
@@ -274,13 +276,10 @@ function getDriveData(login){
 function getFolderContents(req){
 	var login=getLoginFromReq(req),
 		folderLoc=getLocFromReq(req);
-	function abs(subFolder){
-		return path.resolve(folderLoc, subFolder);
-	}
-	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder);
-	contents=contents.filter(subFolder=>pathExists(getAbsPath([folderLoc, subFolder]))); // "C:/System Volume Information" doesn't exist
-	contents=contents.filter(subFolder=>isAllowedPath(getAbsPath([folderLoc, subFolder]), login)); // Don't let people see the stuff they can't access
-	var folders=contents.filter(subFolder=>pathIsDirectory(getAbsPath([folderLoc, subFolder]))).map(x=>x+"/"),
+	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
+		.filter(subFolder=>pathExists(getAbsPath([folderLoc, subFolder]))) // "C:/System Volume Information" doesn't exist
+		.filter(subFolder=>isAllowedPath(getAbsPath([folderLoc, subFolder]), login)), // Don't let people see the stuff they can't access
+		folders=contents.filter(subFolder=>pathIsDirectory(getAbsPath([folderLoc, subFolder]))).map(x=>x+"/"),
 		files=contents.filter(subFolder=>pathIsFile(getAbsPath([folderLoc, subFolder])));
 	return {files:files, folders:folders};
 }
@@ -334,11 +333,9 @@ function isAllowedPath(loc, login){
 	function _isDenied(absLoc, login){
 		return config.accounts[login.username].deny.some(denyElem=>isParentDirOrSelf(absLoc, getAbsPath(denyElem)));
 	}
-	if (!validateLogin(login) || loc===undefined){return false;}
+	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined){return false;}
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc].replace(/^\//, ""), login) && !_isDenied(loc, login);}
-	// Allowing x:/y/ but disallowing x:/y/z/ works as expected
-	// Gotta say, I like how I handled checking lnk files
 	absLoc=getAbsPath(loc);
 	if (isParentDirOrSelf(absLoc, getAbsPath(__dirname)) || absLoc==getAbsPath(kwargs.config)){return false;}
 	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
@@ -365,7 +362,7 @@ function sendError(req, res, args){
 }
 
 // LNK handler
-function getLnkLoc(lnkPath, skipValidation){
+function getLnkLoc(lnkPath, skipValidation, cutBase){
 	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
 	// Also todo: Replace LNKs entirely by using the @ system I used to use
 	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
@@ -375,7 +372,12 @@ function getLnkLoc(lnkPath, skipValidation){
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
 		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
 	try {
-		return lnkRegex.exec(lnkContents)[0].replace(/\\/g, "/");
+		var loc=lnkRegex.exec(lnkContents)[0].replace(/\\/g, "/");
+		// if (!isParentDirOrSelf(loc, config.basePath)){return undefined;} // For some reason this causes problems with getLocFromReq
+		if (cutBase){
+			return loc.split("/").splice(config.basePath.split("/").filter(x=>x!="").length).join("/");
+		}
+		return loc;
 	} catch {
 		return undefined
 	}
