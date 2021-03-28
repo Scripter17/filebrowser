@@ -31,5 +31,6 @@
 	"httpPort":80,
 	"httpsPort":443,
 	"maxFileSize":"50MiB",
-	"basePath":""
+	"basePath":"",
+	"handleLNKFiles":true
 }

@@ -56,10 +56,10 @@ uploadHandler=multer({
 server.get("/", function(req, res){
 	var login=getLoginFromReq(req),
 		rawLoc=req.params[0],
-		loc=getLocFromReq(req);
+		loc=getLocFromReq(req),
+		time=new Date().getTime();
 	logReq(`Requested root (/)`, login, req);
 	if (loc!=""){
-		logRes(`Responding with folderView at basePath ${config.basePath}`, login, req);
 		res.render("folder", {
 			contents:getFolderContents(req),
 			username:login.username, loc:rawLoc,
@@ -67,8 +67,8 @@ server.get("/", function(req, res){
 			hideBack:true,
 			cache:config.viewSettings.cacheViews, filename:"folder"
 		});
+		logRes(`Responded with folderView at basePath ${config.basePath}`, login, req, time);
 	} else {
-		logRes(`Responding with driveView`, login, req);
 		res.render("drives", {
 			drives:getDriveData(login),
 			username:login.username,
@@ -77,6 +77,7 @@ server.get("/", function(req, res){
 			title:"Drive selection",
 			cache:config.viewSettings.cacheViews, filename:"drives"
 		});
+		logRes(`Responded with driveView`, login, req, time);
 	}
 });
 
@@ -101,20 +102,22 @@ server.post("/login", function(req, res){
 
 // Upload form
 server.get("/uploadForm", function(req, res){
-	var login=getLoginFromReq(req);
+	var login=getLoginFromReq(req),
+		time=new Date().getTime();
 	logReq(`Loaded /uploadForm`, login, req);
 	if (isAllowedPath("uploadForm", login)){
-		logRes(`Responded with uploadFormView`, login, req);
 		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.viewSettings.cacheViews, filename:"uploadForm"});
+		logRes(`Responded with uploadFormView`, login, req, time);
 	} else {
-		logRes(`Responded with 403`, login, req);
 		sendError(req, res, {code:403, username:login.username, loc:"uploadForm"});
+		logRes(`Responded with 403`, login, req, time);
 	}
 });
 
 // Upload handler
 server.post('/upload', function(req, res){
-	var login=getLoginFromReq(req);
+	var login=getLoginFromReq(req),
+		time=new Date().getTime();
 	logReq(`Attempting to upload a file`, login, req);
 	if (isAllowedPath("upload", login)){
 		uploadHandler(req, res, function (err){
@@ -125,61 +128,63 @@ server.post('/upload', function(req, res){
 			} else if (err){
 				sendError(req, res, {code:500, username:login.username, desc:"Unknown error handling file upload", loc:"upload"});
 			} else {
-				logRes(`Successfully uploaded file`);
 				var uploadFolder=config.accounts[login.username].canUpload,
 					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
 					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
 				moveFile(req.file.path, filePath); // fs.renameSync failes when moving between drives
 				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:config.viewSettings.cacheViews, filename:"uploaded"});
+				logRes(`Successfully uploaded file`, login, req, time);
 			}
 		});
 	} else {
-		logRes(`Upload rejected with status 403`);
 		sendError(req, res, {code:403, username:login.usernam, loc:"upload"});
+		logRes(`Upload rejected with status 403`, login, req, time);
 	}
 });
 
 // LNK handler
-// TODO: Make optional
-server.get("/**.lnk", function(req, res){
-	var login=getLoginFromReq(req),
-		loc=getLocFromReq(req, ".lnk");
-	logReq(`Loaded LNK file at "${loc}"`, login, req);
-	if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
-		logRes(`Responded with 403 for "${loc}"`, login, res);
-		sendError(req, res, {code:403, username:login.username, loc:loc});
-	} else if (loc in config.redirects){
-		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}" via config.redirects`, login, req);
-		res.redirect("/"+clipBasePath(config.redirects[loc]));
-	} else {
-		logRes(`Redirected to "${clipBasePath(getLnkLoc(loc))}" via LNK file`, login, req);
-		res.redirect("/"+clipBasePath(getLnkLoc(loc)));
-	}
-});
-
+if (config.handleLNKFiles){
+	// This looks so dumb
+	server.get("/**.lnk", function(req, res){
+		var login=getLoginFromReq(req),
+			loc=getLocFromReq(req, ".lnk"),
+			time=new Date().getTime();
+		logReq(`Loaded LNK file at "${loc}"`, login, req);
+		if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
+			sendError(req, res, {code:403, username:login.username, loc:loc});
+			logRes(`Responded with 403 for "${loc}"`, login, res, time);
+		} else if (loc in config.redirects){
+			res.redirect("/"+clipBasePath(config.redirects[loc]));
+			logRes(`Redirected to "${clipBasePath(config.redirects[loc])}" via config.redirects`, login, req, time);
+		} else {
+			res.redirect("/"+clipBasePath(getLnkLoc(loc)));
+			logRes(`Redirected to "${clipBasePath(getLnkLoc(loc))}" via LNK file`, login, req, time);
+		}
+	});
+}
 // Folder/file server
 server.get("/*", function(req, res){
 	var time=new Date().getTime(),
 		login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req),
-		loguser=login.username||"default username";
+		loguser=login.username||"default username",
+		time=new Date().getTime();
 	logReq(`Requested "${rawLoc}"`, login, req);
 	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
-		logRes(`Responded with 403 for "${rawLoc}"`, login, req);
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
+		logRes(`Responded with 403 for "${rawLoc}"`, login, req, time);
 	} else if (rawLoc in config.redirects){
 		// Handle redirects
-		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}"`, login, req);
 		res.redirect("/"+clipBasePath(config.redirects[loc]));
+		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}"`, login, req, time);
 	} else if (!pathExists(loc)){
 		// File/dir not found
-		logRes(`Responded with 404 for "${rawLoc}"`, login, req)
 		sendError(req, res, {code:404, username:login.username, loc:rawLoc});
+		logRes(`Responded with 404 for "${rawLoc}"`, login, req, time)
 	} else if (pathIsDirectory(loc)){
 		// Send directory view
-		logRes(`Responded with folderView for "${rawLoc}"`, login, req);
 		res.render("folder", {
 			contents:getFolderContents(req),
 			username:login.username, loc:rawLoc,
@@ -187,6 +192,7 @@ server.get("/*", function(req, res){
 			hideBack:false,
 			cache:config.viewSettings.cacheViews, filename:"folder"
 		});
+		logRes(`Responded with folderView for "${rawLoc}"`, login, req, time);
 	} else {
 		// Send file
 		if ("thumbnail" in req.query && config.viewSettings.folder.imageRegex.test(loc)){
@@ -205,11 +211,14 @@ server.get("/*", function(req, res){
 				// logRes(`Killing write stream for "${rawLoc}"`, login, req); // Runs on normal req end :/
 				stream.kill();
 			});
-			stream.on("close", function(){res.end();});
+			stream.on("close", function(){
+				res.end();
+				logRes(`Generated thumbnail for "${rawLoc}"`, login, req, time);
+			});
 			//}
 		} else {
-			logRes(`Sending file "${rawLoc}"`, login, req);
 			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
+			logRes(`Sent file "${rawLoc}"`, login, req, time);
 		}
 	}
 });
@@ -240,9 +249,9 @@ function logReq(text, login, req){
 		console.log(`${login.username||"default user"} at ${req.ip}: ${text}`);
 	}
 }
-function logRes(text, login, req){
+function logRes(text, login, req, time){
 	if (kwargs.log_res){
-		console.log(`${login.username||"default user"} at ${req.ip}: ${text}`);
+		console.log(`${login.username||"default user"} at ${req.ip}: ${text}${time===undefined?"":` (time: ${Math.floor((new Date().getTime()-time)/100)/10}s)`}`);
 	}
 }
 
@@ -373,7 +382,7 @@ function isAllowedPath(loc, login){
 	function _isAllowed(absLoc, login){
 		return config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
-			//allowElem=resolvePath(allowElem, false, true)
+			// Note to self: resolvePath("") gives a wrong answer (probably should fix that)
 			if (allowElem.endsWith("/")!=pathIsDirectory(allowElem)){warn(`PathDir mismatch in isAllowedPath._isAllowed (${allowElem})`); return false;}
 			return isParentDirOrSelf(absLoc, allowElem&&resolvePath(allowElem)) || isParentDirOrSelf(allowElem&&resolvePath(allowElem), absLoc);
 		});
@@ -390,7 +399,7 @@ function isAllowedPath(loc, login){
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
 	absLoc=resolvePath(loc);
 	if (isParentDirOrSelf(absLoc, resolvePath(__dirname)) || absLoc==resolvePath(kwargs.config)){return false;}
-	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
+	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (config.handleLNKFiles && isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
 }
 
 // Error handler
