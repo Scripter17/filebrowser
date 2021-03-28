@@ -28,6 +28,8 @@
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
 	"httpsCert":"cert.pem",
+	"httpPort":80,
+	"httpsPort":443,
 	"maxFileSize":"50MiB",
 	"basePath":""
 }

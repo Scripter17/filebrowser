@@ -17,16 +17,16 @@ parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
 	add_help:true
 });
-parser.add_argument("-config", {help:"Set config file", metavar:"config", default:"config.json"});
-parser.add_argument("-hash", {help:"Calculate account password hash", metavar:"password"});
-parser.add_argument("-no-warn", {help:"Disable warnings (probably a bad idea)", action:"store_true"});
-parser.add_argument("-hard-warn", {help:"Throw errors instead of warnings (also probably a bad idea)", action:"store_true"});
-parser.add_argument("-log-req", {help:"Log every request made by any user", action:"store_true"});
-parser.add_argument("-log-res", {help:"Log every request made by any user", action:"store_true"});
+parser.add_argument("-config",    {help:"Set config file",                     metavar:"config", default:"config.json"});
+parser.add_argument("-hash",      {help:"Calculate account password hash",     metavar:"password"});
+parser.add_argument("-no-warn",   {help:"Disable warnings",                    action :"store_true"});
+parser.add_argument("-hard-warn", {help:"Throw errors instead of warnings",    action :"store_true"});
+parser.add_argument("-log-req",   {help:"Log every request  made by any user", action :"store_true"});
+parser.add_argument("-log-res",   {help:"Log every response sent to any user", action :"store_true"});
 kwargs=parser.parse_args();
-console.log(kwargs)
 // Get and validate config
 //absPathCache={};
+var dirContentsCache={}
 getConfig();
 
 // Handle -hash
@@ -60,7 +60,9 @@ server.get("/", function(req, res){
 	var login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req);
+	logReq(`Requested root (/)`, login, req);
 	if (loc!=""){
+		logRes(`Responding with folderView at basePath ${config.basePath}`, login, req);
 		res.render("folder", {
 			contents:getFolderContents(req),
 			username:login.username, loc:rawLoc,
@@ -69,6 +71,7 @@ server.get("/", function(req, res){
 			cache:config.viewSettings.cacheViews, filename:"folder"
 		});
 	} else {
+		logRes(`Responding with driveView`, login, req);
 		res.render("drives", {
 			drives:getDriveData(login),
 			username:login.username,
@@ -83,10 +86,14 @@ server.get("/", function(req, res){
 // Login handler
 server.post("/login", function(req, res){
 	var login=req.body;
+	logReq(`Attempting login`, login, req);
 	if (!validateLogin(login)){
 		// Don't want to set an invalid login
+		logRes(`Invalid login`, login, req);
 		warn(`Invalid login attempt: ${JSON.stringify({username:login.username, password:login.password})}`)
 		login={username:"", password:""};
+	} else {
+		logRes(`Valid login`, login, req);
 	}
 	// Set login cookies for 1 week
 	// TODO: Use GPG or something to make a login token that can't work after the week is up
@@ -98,9 +105,12 @@ server.post("/login", function(req, res){
 // Upload form
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req);
+	logReq(`Loaded /uploadForm`, login, req);
 	if (isAllowedPath("uploadForm", login)){
+		logRes(`Responded with uploadFormView`, login, req);
 		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:config.viewSettings.cacheViews, filename:"uploadForm"});
 	} else {
+		logRes(`Responded with 403`, login, req);
 		sendError(req, res, {code:403, username:login.username, loc:"uploadForm"});
 	}
 });
@@ -108,6 +118,7 @@ server.get("/uploadForm", function(req, res){
 // Upload handler
 server.post('/upload', function(req, res){
 	var login=getLoginFromReq(req);
+	logReq(`Attempting to upload a file`, login, req);
 	if (isAllowedPath("upload", login)){
 		uploadHandler(req, res, function (err){
 			if (err instanceof multer.MulterError){ // TODO: Detect only file too large errors
@@ -117,6 +128,7 @@ server.post('/upload', function(req, res){
 			} else if (err){
 				sendError(req, res, {code:500, username:login.username, desc:"Unknown error handling file upload", loc:"upload"});
 			} else {
+				logRes(`Successfully uploaded file`);
 				var uploadFolder=config.accounts[login.username].canUpload,
 					uploadFolder=uploadFolder===true?config.defaultUploadLoc:uploadFolder, // true means upload to default folder
 					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
@@ -125,6 +137,7 @@ server.post('/upload', function(req, res){
 			}
 		});
 	} else {
+		logRes(`Upload rejected with status 403`);
 		sendError(req, res, {code:403, username:login.usernam, loc:"upload"});
 	}
 });
@@ -134,11 +147,15 @@ server.post('/upload', function(req, res){
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req, ".lnk");
+	logReq(`Loaded LNK file at "${loc}"`, login, req);
 	if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
+		logRes(`Responded with 403 for "${loc}"`, login, res);
 		sendError(req, res, {code:403, username:login.username, loc:loc});
 	} else if (loc in config.redirects){
+		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}" via config.redirects`, login, req);
 		res.redirect("/"+clipBasePath(config.redirects[loc]));
 	} else {
+		logRes(`Redirected to "${clipBasePath(getLnkLoc(loc))}" via LNK file`, login, req);
 		res.redirect("/"+clipBasePath(getLnkLoc(loc)));
 	}
 });
@@ -150,45 +167,51 @@ server.get("/*", function(req, res){
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req),
 		loguser=login.username||"default username";
+	logReq(`Requested "${rawLoc}"`, login, req);
 	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
+		logRes(`Responded with 403 for "${rawLoc}"`, login, req);
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
 	} else if (rawLoc in config.redirects){
 		// Handle redirects
+		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}"`, login, req);
 		res.redirect("/"+clipBasePath(config.redirects[loc]));
 	} else if (!pathExists(loc)){
 		// File/dir not found
+		logRes(`Responded with 404 for "${rawLoc}"`, login, req)
 		sendError(req, res, {code:404, username:login.username, loc:rawLoc});
 	} else if (pathIsDirectory(loc)){
 		// Send directory view
-		if (!loc.endsWith("/")){
-			res.redirect("/"+loc+"/");
-		} else {
-			res.render("folder", {
-				contents:getFolderContents(req),
-				username:login.username, loc:rawLoc,
-				viewSettings:getViewSettingsFromLogin(login),
-				hideBack:false,
-				cache:config.viewSettings.cacheViews, filename:"folder"
-			});
-		}
+		logRes(`Responded with folderView for "${rawLoc}"`, login, req);
+		res.render("folder", {
+			contents:getFolderContents(req),
+			username:login.username, loc:rawLoc,
+			viewSettings:getViewSettingsFromLogin(login),
+			hideBack:false,
+			cache:config.viewSettings.cacheViews, filename:"folder"
+		});
 	} else {
 		// Send file
 		if ("thumbnail" in req.query && config.viewSettings.folder.imageRegex.test(loc)){
+			logRes(`Generating thumbnail for "${rawLoc}"`, login, req);
 			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
 			//if (imageSize[0]*imageSize[1]>=10000*10000){
 			//	res.sendFile(path.resolve("resources/TooBig.png"));
 			//} else {
 			res.set("Content-Type", "image/jpeg");
-			let stream=child_process.spawn( // For some reason using let instead of var makes stream.kill work right
-					"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
-					{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("1GiB")}}
-				);
+			let stream=child_process.spawn( // Note to self: var x is the same between loops, whereas let x is different
+				"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
+				{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("1GiB")}}
+			);
 			stream.stdout.on("data", function(data){res.write(Buffer.from(data));});
-			req.on("close", function(){stream.kill();});
+			req.on("close", function(){
+				// logRes(`Killing write stream for "${rawLoc}"`, login, req); // Runs on normal req end :/
+				stream.kill();
+			});
 			stream.on("close", function(){res.end();});
 			//}
 		} else {
+			logRes(`Sending file "${rawLoc}"`, login, req);
 			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
 		}
 	}
@@ -209,25 +232,35 @@ if (config.useHTTPS){
 // Meta
 function warn(text){
 	if (kwargs.hard_warn){
-		throw new Error("Warning issued with -hard-warn enabled");
+		throw new Error("Warning issued with -hard-warn enabled: "+text);
 	}
 	if (!kwargs.no_warn){
 		console.warn(text);
-		return true;
 	}
-	return false;
+}
+function logReq(text, login, req){
+	if (kwargs.log_req){
+		console.log(`${login.username||"default user"} at ${req.ip}: ${text}`);
+	}
+}
+function logRes(text, login, req){
+	if (kwargs.log_res){
+		console.log(`${login.username||"default user"} at ${req.ip}: ${text}`);
+	}
 }
 
 // Generic filesystem
 function pathIsDirectory(loc){
-	//try {
-		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
-	//} catch {return false;}
+	try {
+		fs.readdirSync(loc);
+		return true;
+		//return pathExists(loc) && fs.lstatSync(loc).isDirectory();
+	} catch {return false;}
 }
 function pathIsFile(loc){
-	//try {
+	try {
 		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
-	//} catch {return false;}
+	} catch {return false;}
 }
 function pathExists(loc){
 	try {
@@ -246,12 +279,18 @@ function moveFile(oldLoc, newLoc){
 		fs.rmSync(oldLoc);
 	}
 }
-function resolvePath(loc, fixCase, absolute){
+function resolvePath(loc, fixCase, absolute, basePath){
 	if (typeof loc!="object"){loc=[loc];}
+	if (basePath===undefined && absolute){basePath=config.basePath}
 	try{
-		loc=path.resolve(absolute?config.basePath:"", ...loc).replace(/\\/g, "/").replace(/^\//g, "");
-		if (fixCase){
-			// Did a test, 100,000 calls of this takes about 10s
+		loc=path.resolve(absolute?basePath:"", ...loc).replace(/\\/g, "/").replace(/^\//g, "");
+		var dirname=path.dirname(loc)
+		if (!(dirname in dirContentsCache) || new Date().getTime()-dirContentsCache[dirname].time>5000){
+			// I hate this so much, but it gets 5000 files down from 2 minutes to 10 seconds
+			dirContentsCache[dirname]={contents:fs.readdirSync(dirname), time:new Date().getTime()};
+		}
+		if (fixCase && dirContentsCache[dirname].contents.indexOf(loc)!=-1){
+			// This function is SLOW
 			loc=true_case_path.trueCasePathSync(loc).replace(/\\/g, "/");
 		}
 		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
@@ -284,23 +323,30 @@ function getDriveData(login){
 function getFolderContents(req){
 	var login=getLoginFromReq(req),
 		folderLoc=getLocFromReq(req);
+	/*
+		1 00006
+		2 28054
+		3 32433
+		4 24691
+		5 25398
+	*/
 	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
-		.filter(subFolder=>pathExists(resolvePath([folderLoc, subFolder]))) // "C:/System Volume Information" doesn't exist
-		.filter(subFolder=>isAllowedPath(resolvePath([folderLoc, subFolder]), login)), // Don't let people see the stuff they can't access
+			.filter(subFolder=>pathExists(resolvePath([folderLoc, subFolder]))) // "C:/System Volume Information" doesn't exist
+			.filter(subFolder=>isAllowedPath(resolvePath([folderLoc, subFolder]), login)), // Don't let people see the stuff they can't access
 		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath([folderLoc, subFolder]))).map(x=>x+"/"),
 		files=contents.filter(subFolder=>pathIsFile(resolvePath([folderLoc, subFolder])));
 	return {files:files, folders:folders};
 }
 
 // Login/Validation
-function hash(text, salt, type){
+function hash(text, saltOverride, typeOverride){
 	// Hash used for passwords. Hash type and salt are set in config.json
 	if (text===undefined){
 		throw new Error("Provided hashstring is undefined (the type, not a string)");
 	}
-	if (salt===undefined){salt=config.hashSalt;} // salt||=config.hashSalt triggers on salt=""
-	type||=config.hashType;
-	return crypto.createHash(type).update(text+salt).digest("hex");
+	if (saltOverride===undefined){saltOverride=config.hashSalt;} // salt||=config.hashSalt triggers on salt===""
+	typeOverride||=config.hashType;
+	return crypto.createHash(typeOverride).update(text+saltOverride).digest("hex");
 }
 function getLoginFromReq(req){
 	// If the provided login is invalid, treat it as an empty login
@@ -335,12 +381,17 @@ function isAllowedPath(loc, login){
 	function _isAllowed(absLoc, login){
 		return config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
-			if (allowElem.endsWith("/")!=pathIsDirectory(allowElem)){warn("PathDir mismatch in isAllowedPath"); return false;}
+			//allowElem=resolvePath(allowElem, false, true)
+			if (allowElem.endsWith("/")!=pathIsDirectory(allowElem)){warn(`PathDir mismatch in isAllowedPath._isAllowed (${allowElem})`); return false;}
 			return isParentDirOrSelf(absLoc, allowElem&&resolvePath(allowElem)) || isParentDirOrSelf(allowElem&&resolvePath(allowElem), absLoc);
 		});
 	}
 	function _isDenied(absLoc, login){
-		return config.accounts[login.username].deny.some(denyElem=>isParentDirOrSelf(absLoc, resolvePath(denyElem)));
+		return config.accounts[login.username].deny.some(function(denyElem){
+			//denyElem=resolvePath(denyElem, false, true);
+			if (denyElem.endsWith("/")!=pathIsDirectory(denyElem)){warn(`PathDir mismatch in isAllowedPath._isDenied (${denyElem})`); return true;}
+			return isParentDirOrSelf(absLoc, resolvePath(denyElem));
+		});
 	}
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
 	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined){return false;}
@@ -367,7 +418,7 @@ function sendError(req, res, args){
 		cache:config.viewSettings.cacheViews, filename:"error"
 	});
 	// Todo: Maybe log IP?
-	warn(`Error ${args.code} from ${args.username || "default user"}: ${args.desc || errorDescs[args.code]} (${args.loc || "unknown loc"})`);
+	warn(`${args.username || "default user"} at ${req.ip}: Error ${args.code} "${args.desc || errorDescs[args.code]} (${args.loc || "unknown loc"})"`);
 }
 
 // LNK/redirect handling
@@ -375,9 +426,7 @@ function getLnkLoc(lnkPath, skipValidation){
 	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
 	// Also todo: Replace LNKs entirely by using the @ system I used to use
 	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
-	if (!skipValidation && !isLnkLoc(lnkPath)){
-		return null
-	}
+	if (!skipValidation && !isLnkLoc(lnkPath)){return null}
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
 		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
 	try {
@@ -385,6 +434,7 @@ function getLnkLoc(lnkPath, skipValidation){
 		// if (!isParentDirOrSelf(loc, config.basePath)){return undefined;} // For some reason this causes problems with getLocFromReq
 		return loc;
 	} catch {
+		warn(`getLnkLoc returned null (${lnkPath})`)
 		return null
 	}
 }
@@ -440,6 +490,27 @@ function validateConfig(config){
 	} catch {
 		var magickInstalled=false;
 	}
+
+	// == PREPROCESSING ==
+	for (let account in config.accounts){
+		let accountData=config.accounts[account];
+		for (let allowElem in accountData.allow){
+			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, true, config.basePath)
+		}
+		for (let denyElem in accountData.deny){
+			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, true, config.basePath)
+		}
+	}
+	if (config.httpPort===undefined){warn("Defaulting httpPort to 80"); config.httpPort=80;}
+	if (config.httpsPort===undefined){warn("Defaulting httpsPort to 443"); config.httpsPort=443;}
+	try{
+		config.viewSettings.folder.imageRegex=new RegExp(config.viewSettings.folder.imageRegex);
+	} catch {throw new Error("imageRegex is invalid");}
+	try {
+		config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
+	} catch {throw new Error("videoRegex is invalid");}
+
+	// == VALIDATION ==
 	for (let redirect in config.redirects){
 		//if (/^[a-z\d]*:\/[^\/]/i.test(config.redirects[redirect])){
 		//	throw new Error(`Redirect "${redirect}" redirects to invalid path`);
@@ -447,7 +518,7 @@ function validateConfig(config){
 	}
 	// Validate accounts
 	for (let account in config.accounts){
-		var accountData=config.accounts[account];
+		let accountData=config.accounts[account];
 		if (accountData.passHash.length!=hash("", config.hashSalt, config.hashType).length){
 			throw new Error(`${account} has an invalid passHash length`);
 		}
@@ -523,9 +594,6 @@ function validateConfig(config){
 			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsCert}")`);
 		}
 	}
-	// == PARSING ==
-	config.viewSettings.folder.imageRegex=new RegExp(config.viewSettings.folder.imageRegex);
-	config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
 	return config;
 }
 function getViewSettingsFromLogin(login){
