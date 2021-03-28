@@ -8,7 +8,6 @@ path=require("path");
 fs=require("fs");
 crypto=require("crypto");
 child_process=require("child_process");
-true_case_path=require("true-case-path");
 
 // == INITIALIZATION ==
 
@@ -25,8 +24,6 @@ parser.add_argument("-log-req",   {help:"Log every request  made by any user", a
 parser.add_argument("-log-res",   {help:"Log every response sent to any user", action :"store_true"});
 kwargs=parser.parse_args();
 // Get and validate config
-//absPathCache={};
-var dirContentsCache={}
 getConfig();
 
 // Handle -hash
@@ -251,16 +248,16 @@ function logRes(text, login, req){
 
 // Generic filesystem
 function pathIsDirectory(loc){
-	try {
-		fs.readdirSync(loc);
-		return true;
-		//return pathExists(loc) && fs.lstatSync(loc).isDirectory();
-	} catch {return false;}
+	//try {
+		//fs.readdirSync(loc);
+		//return true;
+		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
+	//} catch {return false;}
 }
 function pathIsFile(loc){
-	try {
+	//try {
 		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
-	} catch {return false;}
+	//} catch {return false;}
 }
 function pathExists(loc){
 	try {
@@ -284,14 +281,8 @@ function resolvePath(loc, fixCase, absolute, basePath){
 	if (basePath===undefined && absolute){basePath=config.basePath}
 	try{
 		loc=path.resolve(absolute?basePath:"", ...loc).replace(/\\/g, "/").replace(/^\//g, "");
-		var dirname=path.dirname(loc)
-		if (!(dirname in dirContentsCache) || new Date().getTime()-dirContentsCache[dirname].time>5000){
-			// I hate this so much, but it gets 5000 files down from 2 minutes to 10 seconds
-			dirContentsCache[dirname]={contents:fs.readdirSync(dirname), time:new Date().getTime()};
-		}
-		if (fixCase && dirContentsCache[dirname].contents.indexOf(loc)!=-1){
-			// This function is SLOW
-			loc=true_case_path.trueCasePathSync(loc).replace(/\\/g, "/");
+		if (fixCase){
+			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
 		}
 		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
 		return loc;
@@ -324,6 +315,7 @@ function getFolderContents(req){
 	var login=getLoginFromReq(req),
 		folderLoc=getLocFromReq(req);
 	/*
+		Before optimizing resolvePath
 		1 00006
 		2 28054
 		3 32433
