@@ -11,6 +11,23 @@ FileBrowser is a project I've been working on for a few years now. It's gone thr
 
 ---
 
+## Command line arguments
+
+```
+usage: filebrowser.js [-h] [--config config] [--hash password] [--no-warn] [--hard-warn] [--log-req] [--log-res]
+
+FileBrowser CLI
+
+optional arguments:
+  -h, --help       show this help message and exit
+  --config config  Set config file
+  --hash password  Calculate a passHash for the config
+  --no-warn        Disable warnings
+  --hard-warn      Throw errors instead of warnings
+  --log-req        Log every request made by any user
+  --log-res        Log every response sent to any user
+```
+
 ## Config.json
 
 Before you can properly use FileBrowser, you need to set up config.json. This manages all accounts, what they can/can't access, and whether or not they can upload files

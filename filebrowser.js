@@ -16,12 +16,12 @@ parser=new argparse.ArgumentParser({
 	description:"FileBrowser CLI",
 	add_help:true
 });
-parser.add_argument("-config",    {help:"Set config file",                     metavar:"config", default:"config.json"});
-parser.add_argument("-hash",      {help:"Calculate account password hash",     metavar:"password"});
-parser.add_argument("-no-warn",   {help:"Disable warnings",                    action :"store_true"});
-parser.add_argument("-hard-warn", {help:"Throw errors instead of warnings",    action :"store_true"});
-parser.add_argument("-log-req",   {help:"Log every request  made by any user", action :"store_true"});
-parser.add_argument("-log-res",   {help:"Log every response sent to any user", action :"store_true"});
+parser.add_argument("--config",    {help:"Set config file",                     metavar:"config", default:"config.json"});
+parser.add_argument("--hash",      {help:"Calculate a passHash for the config", metavar:"password"});
+parser.add_argument("--no-warn",   {help:"Disable warnings",                    action :"store_true"});
+parser.add_argument("--hard-warn", {help:"Throw errors instead of warnings",    action :"store_true"});
+parser.add_argument("--log-req",   {help:"Log every request  made by any user", action :"store_true"});
+parser.add_argument("--log-res",   {help:"Log every response sent to any user", action :"store_true"});
 kwargs=parser.parse_args();
 // Get and validate config
 getConfig();
@@ -60,6 +60,7 @@ server.get("/", function(req, res){
 		time=new Date().getTime();
 	logReq(`Requested root (/)`, login, req);
 	if (loc!=""){
+		// If the basePath is set, there's no sense is returning driveView
 		res.render("folder", {
 			contents:getFolderContents(req),
 			username:login.username, loc:rawLoc,
@@ -86,10 +87,9 @@ server.post("/login", function(req, res){
 	var login=req.body;
 	logReq(`Attempting login`, login, req);
 	if (!validateLogin(login)){
-		// Don't want to set an invalid login
 		logRes(`Invalid login`, login, req);
 		warn(`Invalid login attempt: ${JSON.stringify({username:login.username, password:login.password})}`)
-		login={username:"", password:""};
+		login={username:"", password:""}; // Don't want to set an invalid login
 	} else {
 		logRes(`Valid login`, login, req);
 	}
@@ -258,8 +258,6 @@ function logRes(text, login, req, time){
 // Generic filesystem
 function pathIsDirectory(loc){
 	//try {
-		//fs.readdirSync(loc);
-		//return true;
 		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
@@ -278,6 +276,7 @@ function pathExists(loc){
 }
 function moveFile(oldLoc, newLoc){
 	// Idea taken from https://stackoverflow.com/a/29105404/10720231
+	// Basically fs.renameSync("C:/File", "E:/File") doesn't work even if C: and E: are partitions on the same storage media
 	try {
 		fs.renameSync(oldLoc, newLoc);
 	} catch {
@@ -285,17 +284,19 @@ function moveFile(oldLoc, newLoc){
 		fs.rmSync(oldLoc);
 	}
 }
-function resolvePath(loc, fixCase, absolute, basePath){
-	if (typeof loc!="object"){loc=[loc];}
-	if (basePath===undefined && absolute){basePath=config.basePath}
+function resolvePath(loc, fixCase, basePath){
+	if (basePath===true){basePath=config.basePath;}
 	try{
-		loc=path.resolve(absolute?basePath:"", ...loc).replace(/\\/g, "/").replace(/^\//g, "");
+		loc=path.resolve(basePath||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
 		if (fixCase){
 			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
 		}
 		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
 		return loc;
-	} catch {return null;}
+	} catch {
+		warn(`resolvePath returned null ("${loc}", ${fixCase}, "${basePath}")`);
+		return null;
+	}
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
@@ -308,7 +309,7 @@ function isParentDirOrSelf(loc, parentLoc){
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
 }
 function clipBasePath(loc){
-	if (!isParentDirOrSelf(loc, config.basePath)){throw new Error("aaa")}
+	if (!isParentDirOrSelf(loc, config.basePath)){throw new Error(`clipBasePath recieved a loc that doesn't start with config.basePath ("${loc}")`)}
 	return loc.split("/").splice(config.basePath.split("/").filter(x=>x!="").length).join("/");
 }
 
@@ -332,10 +333,10 @@ function getFolderContents(req){
 		5 25398
 	*/
 	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
-			.filter(subFolder=>pathExists(resolvePath([folderLoc, subFolder]))) // "C:/System Volume Information" doesn't exist
-			.filter(subFolder=>isAllowedPath(resolvePath([folderLoc, subFolder]), login)), // Don't let people see the stuff they can't access
-		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath([folderLoc, subFolder]))).map(x=>x+"/"),
-		files=contents.filter(subFolder=>pathIsFile(resolvePath([folderLoc, subFolder])));
+			.filter(subFolder=>pathExists(resolvePath(subFolder, false, folderLoc))) // "C:/System Volume Information" doesn't exist
+			.filter(subFolder=>isAllowedPath(resolvePath(subFolder, false, folderLoc), login)), // Don't let people see the stuff they can't access
+		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath(subFolder, false, folderLoc))).map(x=>x+"/"),
+		files=contents.filter(subFolder=>pathIsFile(resolvePath(subFolder, false, folderLoc)));
 	return {files:files, folders:folders};
 }
 
@@ -356,7 +357,7 @@ function getLoginFromReq(req){
 }
 function validateLogin(login){
 	if (typeof login!="object" || !("username" in login) || !("password" in login)){
-		warn("Invalid login passed into validateLogin")
+		warn("validateLogin recieved an invalid login afgument");
 		return false;
 	}
 	if (!(login.username in config.accounts)){
@@ -371,7 +372,7 @@ function getLocFromReq(req, suffix){
 	if (config.basePath=="" || loc in config.redirects){
 		return loc;
 	} else {
-		loc=resolvePath([config.basePath, loc]);
+		loc=resolvePath(loc, false, true);
 		if (loc===undefined || !isParentDirOrSelf(loc, config.basePath)){loc="";}
 		return loc;
 	}
@@ -427,7 +428,10 @@ function getLnkLoc(lnkPath, skipValidation){
 	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
 	// Also todo: Replace LNKs entirely by using the @ system I used to use
 	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
-	if (!skipValidation && !isLnkLoc(lnkPath)){return null}
+	if (!skipValidation && !isLnkLoc(lnkPath)){
+		warn(`getLnkLoc returned null ("${lnkPath}")`);
+		return null;
+	}
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
 		lnkRegex=/(?<=\0)[a-z]:\\[^\0]*?(?=\0)/i; // Apparently ?<= works in Node
 	try {
@@ -435,8 +439,8 @@ function getLnkLoc(lnkPath, skipValidation){
 		// if (!isParentDirOrSelf(loc, config.basePath)){return undefined;} // For some reason this causes problems with getLocFromReq
 		return loc;
 	} catch {
-		warn(`getLnkLoc returned null (${lnkPath})`)
-		return null
+		warn(`getLnkLoc returned null ("${lnkPath}")`);
+		return null;
 	}
 }
 function isLnkLoc(lnkPath){
@@ -496,10 +500,10 @@ function validateConfig(config){
 	for (let account in config.accounts){
 		let accountData=config.accounts[account];
 		for (let allowElem in accountData.allow){
-			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, true, config.basePath)
+			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, config.basePath)
 		}
 		for (let denyElem in accountData.deny){
-			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, true, config.basePath)
+			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, config.basePath)
 		}
 	}
 	if (config.httpPort===undefined){warn("Defaulting httpPort to 80"); config.httpPort=80;}
