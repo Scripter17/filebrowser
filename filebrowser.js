@@ -260,19 +260,20 @@ function logRes(text, login, req, time){
 }
 
 // Generic filesystem
-function pathIsDirectory(loc){
+function pathIsDirectory(loc, caseInsensitive){
 	//try {
-		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
+		return pathExists(loc, caseInsensitive) && fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathIsFile(loc){
+function pathIsFile(loc, caseInsensitive){
 	//try {
-		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
+		return pathExists(loc, caseInsensitive) && !fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathExists(loc){
+function pathExists(loc, caseInsensitive){
 	try {
 		fs.lstatSync(loc);
+		if (caseInsensitive){return true;}
 		var resLoc=path.resolve(loc).replace(/\\/g, "/");
 		if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
 		return resolvePath(loc, true)===resLoc;
@@ -291,15 +292,16 @@ function moveFile(oldLoc, newLoc){
 function resolvePath(loc, fixCase, basePath){
 	if (basePath===true){basePath=config.basePath;}
 	try{
+		if (loc[0]=="/"&&loc[2]==":"){loc=loc.substr(1, loc.length-1);}
 		loc=path.resolve(basePath||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
 		if (fixCase){
 			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
 		}
-		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
+		if (pathIsDirectory(loc, true) && !loc.endsWith("/")){loc+="/";}
 		return loc;
 	} catch {
-		warn(`resolvePath returned null ("${loc}", ${fixCase}, "${basePath}")`);
-		return null;
+		warn(`resolvePath threw an error ("${loc}", ${fixCase}, "${basePath}")`);
+		return loc;
 	}
 }
 function isParentDirOrSelf(loc, parentLoc){
@@ -338,41 +340,39 @@ function getFolderContents(req){
 		5 25398
 	*/
 	function formatLoc(loc){
-		console.log(loc)
 		if (resolvePath(loc)==loc){
-			return (loc[0]!="/"?"/":"")+loc+(pathIsDirectory(loc)&&!loc.endsWith("/")?"/":"");
+			return (loc[0]!="/"?"/":"")+loc+(pathIsDirectory(resolvePath(loc, false, folderLoc))&&!loc.endsWith("/")?"/":"");
 		}
-		return loc+(pathIsDirectory(loc)&&!loc.endsWith("/")?"/":"")
+		return loc+(pathIsDirectory(resolvePath(loc, false, folderLoc))&&!loc.endsWith("/")?"/":"")
 	}
 	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
-			.concat(...getAtContents(req))
+			.concat(...getAtContents(folderLoc, login))
 			//.filter(subFolder=>pathExists(resolvePath(subFolder, false, folderLoc))) // "C:/System Volume Information" doesn't exist
 			.filter(subFolder=>isAllowedPath(resolvePath(subFolder, false, folderLoc), login)), // Don't let people see the stuff they can't access
 		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath(subFolder, false, folderLoc))).map(x=>formatLoc(x)).sort()
 		files=contents.filter(subFolder=>pathIsFile(resolvePath(subFolder, false, folderLoc))).map(x=>formatLoc(x)).sort();
 	return {files:files, folders:folders};
 }
-function getAtContents(req){
-	var login=getLoginFromReq(req),
-		loc=getLocFromReq(req),
-		viewSettings=getViewSettingsFromLogin(login);
-	if (!viewSettings.folder.handleAtFiles || !pathIsFile(path.resolve(loc, "@"))){return [];}
-	var ret=[],
-		lines=fs.readFileSync(resolvePath("@", false, loc)).toString().split(/[\r\n]+/).filter(x=>!x.startsWith("#")&&x!="").map(x=>resolvePath(x, false, loc));
+function getAtContents(loc, login){
+	var viewSettings=getViewSettingsFromLogin(login),
+		ret=[];
+	if (!viewSettings.folder.handleAtFiles||!pathIsFile(resolvePath("@", false, loc))){return ret;}
+	var lines=fs.readFileSync(resolvePath("@", false, loc)).toString()
+			.split(/[\r\n]+/)
+			.filter(x=>!x.startsWith("//"))
+			.map(x=>resolvePath(x,false,loc));
 	for (var line of lines){
 		console.log(line)
 		if (pathIsDirectory(line)){
-			ret.push(...fs.readdirSync(line).map(function(x){
-				var ret=clipBasePath(resolvePath(x, false, line), loc);
-				console.log(1,ret)
-				return (resolvePath(ret)==ret?"":"./")+ret;
-			}));
-		} else if (pathIsFile(line)){
-			ret.push(line);
+			console.log("dir")
+			ret.push(...fs.readdirSync(line).map(x=>resolvePath(x, false, line)))
+			ret.push(...getAtContents(line, login));
 		} else {
-			warn(`@ file "${path.resolve(loc, "@")}" has invalid line ("${line}")`);
+			console.log("file", isParentDirOrSelf(line, loc), clipBasePath(line, loc))
+			ret.push(line);
 		}
 	}
+	ret=ret.map(x=>(isParentDirOrSelf(x, loc)?"./":"/")+clipBasePath(x, loc))
 	console.log(ret)
 	return ret;
 }
