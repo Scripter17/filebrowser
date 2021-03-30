@@ -19,7 +19,9 @@
 			"imageMode":"link",
 			"imageRegex":"\\.(a?png|j(pe?g|fif)|gif|bmp)$",
 			"videoMode":"link",
-			"videoRegex":"\\.(mp4|mov|webm|mkv)$"
+			"videoRegex":"\\.(mp4|mov|webm|mkv)$",
+			"handleLNKFiles":true,
+			"handleAtFiles":true
 		}
 	},
 	"defaultUploadLoc":"./files",
@@ -31,6 +33,5 @@
 	"httpPort":80,
 	"httpsPort":443,
 	"maxFileSize":"50MiB",
-	"basePath":"",
-	"handleLNKFiles":true
+	"basePath":""
 }

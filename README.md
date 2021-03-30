@@ -67,7 +67,8 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 	"httpsCert":"cert.pem",
 	"maxFileSize":"50MiB",
 	"basePath":"",
-	"handleLNKFiles":true
+	"handleLNKFiles":true,
+	"handleAtFiles":true
 }
 
 ```
@@ -93,6 +94,8 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `viewSettings.folder.imageRegex`: A Regular Expression string to check if a file path is an image
 - `viewSettings.folder.videoMode`: Either `"link"` or `"embed"`. Works the same as `viewSettings.folder.imageMode` except for videos
 - `viewSettings.folder.videoRegex`: A Regular Expression string to check if a file path is an video
+- `viewSettings.folder.handleLNKFiles`: If `true`, LNK files (generated with the "create shortcut" button in Windows' file explorer) redirect to the file/folder they link to
+- `viewSettings.folder.handleAtFiles`: If `true`, files named `@` will be read and any lines containing file/folder paths will appear in the folderView for the folder the `@` file is in
 
 ### Uploading
 
@@ -108,9 +111,6 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `httpsCert`: The path to an HTTPS cert (only tested with .pem files)
 - `basePath`: A single folder for filebrowser to access instead of the entire computer. Currently experimental (keep as `""` to reveal whole computer)
 
-### Stuff I really should move to `viewSettings.folder`
-
-- `handleLNKFiles`: If `true`, LNK files (generated with the "create shortcut" button in Windows' file explorer) redirect to the file/folder they link to
 
 # License
 
