@@ -205,10 +205,6 @@ function elseViewHandler(req, res){
 		// Send file
 		if ("thumbnail" in req.query && viewSettings.folder.imageRegex.test(loc)){
 			logRes(`Generating thumbnail for "${rawLoc}"`, login, req);
-			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
-			//if (imageSize[0]*imageSize[1]>=10000*10000){
-			//	res.sendFile(path.resolve("resources/TooBig.png"));
-			//} else {
 			res.set("Content-Type", "image/jpeg");
 			let stream=child_process.spawn( // Note to self: var x is the same between loops, whereas let x is different
 				"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
@@ -318,7 +314,7 @@ function isParentDirOrSelf(loc, parentLoc){
 }
 function clipBasePath(loc, basePathOverride){
 	if (basePathOverride===undefined){basePathOverride=config.basePath;}
-	//if (!isParentDirOrSelf(loc, basePath)){throw new Error(`clipBasePath recieved a loc that doesn't start with config.basePath ("${loc}")`)}
+	if (!isParentDirOrSelf(loc, basePathOverride)){return loc;}
 	return loc.split("/").splice(basePathOverride.split("/").filter(x=>x!="").length).join("/");
 }
 
@@ -341,12 +337,19 @@ function getFolderContents(req){
 		4 24691
 		5 25398
 	*/
+	function formatLoc(loc){
+		console.log(loc)
+		if (resolvePath(loc)==loc){
+			return (loc[0]!="/"?"/":"")+loc+(pathIsDirectory(loc)&&!loc.endsWith("/")?"/":"");
+		}
+		return loc+(pathIsDirectory(loc)&&!loc.endsWith("/")?"/":"")
+	}
 	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
 			.concat(...getAtContents(req))
-			.filter(subFolder=>pathExists(resolvePath(subFolder, false, folderLoc))) // "C:/System Volume Information" doesn't exist
+			//.filter(subFolder=>pathExists(resolvePath(subFolder, false, folderLoc))) // "C:/System Volume Information" doesn't exist
 			.filter(subFolder=>isAllowedPath(resolvePath(subFolder, false, folderLoc), login)), // Don't let people see the stuff they can't access
-		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath(subFolder, false, folderLoc))).map(x=>x+"/").sort(),
-		files=contents.filter(subFolder=>pathIsFile(resolvePath(subFolder, false, folderLoc))).sort();
+		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath(subFolder, false, folderLoc))).map(x=>formatLoc(x)).sort()
+		files=contents.filter(subFolder=>pathIsFile(resolvePath(subFolder, false, folderLoc))).map(x=>formatLoc(x)).sort();
 	return {files:files, folders:folders};
 }
 function getAtContents(req){
@@ -354,16 +357,23 @@ function getAtContents(req){
 		loc=getLocFromReq(req),
 		viewSettings=getViewSettingsFromLogin(login);
 	if (!viewSettings.folder.handleAtFiles || !pathIsFile(path.resolve(loc, "@"))){return [];}
-	var ret=[];
-	for (var line of fs.readFileSync(path.resolve(loc, "@")).toString().split(/[\r\n]+/).filter(x=>!x.startsWith("#")&&x!="").map(x=>resolvePath(x, true, loc))){
+	var ret=[],
+		lines=fs.readFileSync(resolvePath("@", false, loc)).toString().split(/[\r\n]+/).filter(x=>!x.startsWith("#")&&x!="").map(x=>resolvePath(x, false, loc));
+	for (var line of lines){
+		console.log(line)
 		if (pathIsDirectory(line)){
-			ret.push(...fs.readdirSync(line).map(x=>"./"+clipBasePath(line+x, loc)));
+			ret.push(...fs.readdirSync(line).map(function(x){
+				var ret=clipBasePath(resolvePath(x, false, line), loc);
+				console.log(1,ret)
+				return (resolvePath(ret)==ret?"":"./")+ret;
+			}));
 		} else if (pathIsFile(line)){
 			ret.push(line);
 		} else {
 			warn(`@ file "${path.resolve(loc, "@")}" has invalid line ("${line}")`);
 		}
 	}
+	console.log(ret)
 	return ret;
 }
 
@@ -423,7 +433,7 @@ function isAllowedPath(loc, login){
 		});
 	}
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
-	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined){return false;}
+	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined || !pathExists(loc)){return false;}
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
 	absLoc=resolvePath(loc);
 	if (isParentDirOrSelf(absLoc, resolvePath(__dirname)) || absLoc==resolvePath(kwargs.config)){return false;}
