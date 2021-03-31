@@ -260,23 +260,26 @@ function logRes(text, login, req, time){
 }
 
 // Generic filesystem
-function pathIsDirectory(loc, caseInsensitive){
+function pathIsDirectory(loc, parentLoc){
 	//try {
-		return pathExists(loc, caseInsensitive) && fs.lstatSync(loc).isDirectory();
+		if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
+		if (parentLoc!==undefined){loc=resolvePath(loc, parentLoc);}
+		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathIsFile(loc, caseInsensitive){
+function pathIsFile(loc, parentLoc){
 	//try {
-		return pathExists(loc, caseInsensitive) && !fs.lstatSync(loc).isDirectory();
+		if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
+		if (parentLoc!==undefined){loc=resolvePath(loc, parentLoc);}
+		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathExists(loc, caseInsensitive){
+function pathExists(loc, parentLoc){
 	try {
+		//if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
+		//if (parentLoc!==undefined){loc=resolvePath(loc, parentLoc);}
 		fs.lstatSync(loc);
-		if (caseInsensitive){return true;}
-		var resLoc=path.resolve(loc).replace(/\\/g, "/");
-		if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
-		return resolvePath(loc, true)===resLoc;
+		return resolvePath(loc, parentLoc, false)==resolvePath(loc, parentLoc, true);
 	} catch {return false;}
 }
 function moveFile(oldLoc, newLoc){
@@ -289,18 +292,18 @@ function moveFile(oldLoc, newLoc){
 		fs.rmSync(oldLoc);
 	}
 }
-function resolvePath(loc, fixCase, basePath){
-	if (basePath===true){basePath=config.basePath;}
+function resolvePath(loc, basePathOverride, fixCase){
+	if (basePathOverride===true){basePathOverride=config.basePath;}
 	try{
 		if (loc[0]=="/"&&loc[2]==":"){loc=loc.substr(1, loc.length-1);}
-		loc=path.resolve(basePath||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
+		loc=path.resolve(basePathOverride||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
 		if (fixCase){
 			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
 		}
-		if (pathIsDirectory(loc, true) && !loc.endsWith("/")){loc+="/";}
+		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
 		return loc;
 	} catch {
-		warn(`resolvePath threw an error ("${loc}", ${fixCase}, "${basePath}")`);
+		warn(`resolvePath threw an error ("${loc}", "${basePathOverride}")`);
 		return loc;
 	}
 }
@@ -331,49 +334,36 @@ function getDriveData(login){
 function getFolderContents(req){
 	var login=getLoginFromReq(req),
 		folderLoc=getLocFromReq(req);
-	/*
-		Before optimizing resolvePath
-		1 00006
-		2 28054
-		3 32433
-		4 24691
-		5 25398
-	*/
 	function formatLoc(loc){
 		if (resolvePath(loc)==loc){
-			return (loc[0]!="/"?"/":"")+loc+(pathIsDirectory(resolvePath(loc, false, folderLoc))&&!loc.endsWith("/")?"/":"");
+			return (loc[0]!="/"?"/":"")+loc+(pathIsDirectory(loc, folderLoc)&&!loc.endsWith("/")?"/":"");
 		}
-		return loc+(pathIsDirectory(resolvePath(loc, false, folderLoc))&&!loc.endsWith("/")?"/":"")
+		return loc+(pathIsDirectory(loc, folderLoc)&&!loc.endsWith("/")?"/":"")
 	}
-	var contents=fs.readdirSync(folderLoc).map(subFolder=>"./"+subFolder)
+	var contents=fs.readdirSync(folderLoc).map(content=>"./"+content)
 			.concat(...getAtContents(folderLoc, login))
-			//.filter(subFolder=>pathExists(resolvePath(subFolder, false, folderLoc))) // "C:/System Volume Information" doesn't exist
-			.filter(subFolder=>isAllowedPath(resolvePath(subFolder, false, folderLoc), login)), // Don't let people see the stuff they can't access
-		folders=contents.filter(subFolder=>pathIsDirectory(resolvePath(subFolder, false, folderLoc))).map(x=>formatLoc(x)).sort()
-		files=contents.filter(subFolder=>pathIsFile(resolvePath(subFolder, false, folderLoc))).map(x=>formatLoc(x)).sort();
+			//.filter(content=>pathExists(resolvePath(content, false, folderLoc))) // "C:/System Volume Information" doesn't exist
+			.filter(content=>isAllowedPath(resolvePath(content, folderLoc), login)) // Don't let people see the stuff they can't access
+			.map(x=>formatLoc(x));
+	contents=contents.filter((x,i)=>i==contents.indexOf(x));
+	var folders=contents.filter(content=>pathIsDirectory(content, folderLoc)).sort(),
+		files=contents.filter(content=>pathIsFile(content, folderLoc)).sort();
 	return {files:files, folders:folders};
 }
 function getAtContents(loc, login){
 	var viewSettings=getViewSettingsFromLogin(login),
 		ret=[];
-	if (!viewSettings.folder.handleAtFiles||!pathIsFile(resolvePath("@", false, loc))){return ret;}
-	var lines=fs.readFileSync(resolvePath("@", false, loc)).toString()
-			.split(/[\r\n]+/)
-			.filter(x=>!x.startsWith("//"))
-			.map(x=>resolvePath(x,false,loc));
+	if (!viewSettings.folder.handleAtFiles||!pathIsFile("@", loc)){return ret;}
+	var lines=fs.readFileSync(resolvePath("@", loc)).toString()
+			.split(/[\r\n]+/).filter(line=>!line.startsWith("//")&&line).map(content=>resolvePath(content, loc));
 	for (var line of lines){
-		console.log(line)
 		if (pathIsDirectory(line)){
-			console.log("dir")
-			ret.push(...fs.readdirSync(line).map(x=>resolvePath(x, false, line)))
+			ret.push(...fs.readdirSync(line).map(content=>resolvePath(content, line)));
 			ret.push(...getAtContents(line, login));
-		} else {
-			console.log("file", isParentDirOrSelf(line, loc), clipBasePath(line, loc))
-			ret.push(line);
 		}
+		ret.push(line);
 	}
-	ret=ret.map(x=>(isParentDirOrSelf(x, loc)?"./":"/")+clipBasePath(x, loc))
-	console.log(ret)
+	ret=ret.map(x=>(isParentDirOrSelf(x, loc)?"./":"/")+clipBasePath(x.replace(/^\/+/, ""), loc));
 	return ret;
 }
 
@@ -409,7 +399,7 @@ function getLocFromReq(req, suffix){
 	if (config.basePath=="" || loc in config.redirects){
 		return loc;
 	} else {
-		loc=resolvePath(loc, false, true);
+		loc=resolvePath(loc, true);
 		if (loc===undefined || !isParentDirOrSelf(loc, config.basePath)){loc="";}
 		return loc;
 	}
@@ -429,7 +419,7 @@ function isAllowedPath(loc, login){
 		return config.accounts[login.username].deny.some(function(denyElem){
 			//denyElem=resolvePath(denyElem, false, true);
 			if (denyElem.endsWith("/")!=pathIsDirectory(denyElem)){warn(`PathDir mismatch in isAllowedPath._isDenied (${denyElem})`); return true;}
-			return isParentDirOrSelf(absLoc, resolvePath(denyElem));
+			return isParentDirOrSelf(absLoc, resolvePath(denyElem, undefined, true));
 		});
 	}
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
@@ -538,10 +528,10 @@ function validateConfig(config){
 	for (let account in config.accounts){
 		let accountData=config.accounts[account];
 		for (let allowElem in accountData.allow){
-			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, config.basePath)
+			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], config.basePath)
 		}
 		for (let denyElem in accountData.deny){
-			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, config.basePath)
+			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], config.basePath)
 		}
 	}
 	if (config.httpPort===undefined){warn("Defaulting httpPort to 80"); config.httpPort=80;}
