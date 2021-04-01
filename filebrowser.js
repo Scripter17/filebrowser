@@ -205,6 +205,10 @@ function elseViewHandler(req, res){
 		// Send file
 		if ("thumbnail" in req.query && viewSettings.folder.imageRegex.test(loc)){
 			logRes(`Generating thumbnail for "${rawLoc}"`, login, req);
+			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
+			//if (imageSize[0]*imageSize[1]>=10000*10000){
+			//	res.sendFile(path.resolve("resources/TooBig.png"));
+			//} else {
 			res.set("Content-Type", "image/jpeg");
 			let stream=child_process.spawn( // Note to self: var x is the same between loops, whereas let x is different
 				"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
@@ -260,26 +264,22 @@ function logRes(text, login, req, time){
 }
 
 // Generic filesystem
-function pathIsDirectory(loc, parentLoc){
+function pathIsDirectory(loc){
 	//try {
-		if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
-		if (parentLoc!==undefined){loc=resolvePath(loc, parentLoc);}
 		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathIsFile(loc, parentLoc){
+function pathIsFile(loc){
 	//try {
-		if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
-		if (parentLoc!==undefined){loc=resolvePath(loc, parentLoc);}
 		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathExists(loc, parentLoc){
+function pathExists(loc){
 	try {
-		//if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
-		//if (parentLoc!==undefined){loc=resolvePath(loc, parentLoc);}
 		fs.lstatSync(loc);
-		return resolvePath(loc, parentLoc, false)==resolvePath(loc, parentLoc, true);
+		var resLoc=path.resolve(loc).replace(/\\/g, "/");
+		if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
+		return resolvePath(loc, true)===resLoc;
 	} catch {return false;}
 }
 function moveFile(oldLoc, newLoc){
@@ -292,20 +292,16 @@ function moveFile(oldLoc, newLoc){
 		fs.rmSync(oldLoc);
 	}
 }
-function resolvePath(loc, basePathOverride, fixCase){
+function resolvePath(loc, fixCase, basePathOverride){
 	if (basePathOverride===true){basePathOverride=config.basePath;}
-	try{
-		if (loc[0]=="/"&&loc[2]==":"){loc=loc.substr(1, loc.length-1);}
-		loc=path.resolve(basePathOverride||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
+	loc=path.resolve(basePathOverride||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
+	try {
 		if (fixCase){
 			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
 		}
 		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
-		return loc;
-	} catch {
-		warn(`resolvePath threw an error ("${loc}", "${basePathOverride}")`);
-		return loc;
-	}
+	} catch {warn(`resolvePath was given a non-existent loc ("${loc}", ${fixCase}, "${basePathOverride}")`)}
+	return loc;
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
@@ -319,7 +315,8 @@ function isParentDirOrSelf(loc, parentLoc){
 }
 function clipBasePath(loc, basePathOverride){
 	if (basePathOverride===undefined){basePathOverride=config.basePath;}
-	if (!isParentDirOrSelf(loc, basePathOverride)){return loc;}
+	//if (!isParentDirOrSelf(loc, basePath)){throw new Error(`clipBasePath recieved a loc that doesn't start with config.basePath ("${loc}")`)}
+	if (!isParentDirOrSelf(loc, basePathOverride)){return loc}
 	return loc.split("/").splice(basePathOverride.split("/").filter(x=>x!="").length).join("/");
 }
 
@@ -331,39 +328,46 @@ function getDriveData(login){
 		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
 		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
 }
+function formatPathToLink(loc, parent, relative, doBasePath){
+	if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
+	loc=resolvePath(loc, false, parent);
+	if (relative){
+		loc=clipBasePath(loc, parent);
+	}
+	if (/^[a-z]:/i.test(loc)){
+		if (doBasePath){loc=clipBasePath(loc)}
+		loc="/"+loc;
+	} else {
+		loc="./"+loc;
+	}
+	if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
+	return loc;
+}
 function getFolderContents(req){
 	var login=getLoginFromReq(req),
-		folderLoc=getLocFromReq(req);
-	function formatLoc(loc){
-		if (resolvePath(loc)==loc){
-			return (loc[0]!="/"?"/":"")+loc+(pathIsDirectory(loc, folderLoc)&&!loc.endsWith("/")?"/":"");
-		}
-		return loc+(pathIsDirectory(loc, folderLoc)&&!loc.endsWith("/")?"/":"")
-	}
-	var contents=fs.readdirSync(folderLoc).map(content=>"./"+content)
-			.concat(...getAtContents(folderLoc, login))
-			//.filter(content=>pathExists(resolvePath(content, false, folderLoc))) // "C:/System Volume Information" doesn't exist
-			.filter(content=>isAllowedPath(resolvePath(content, folderLoc), login)) // Don't let people see the stuff they can't access
-			.map(x=>formatLoc(x));
-	contents=contents.filter((x,i)=>i==contents.indexOf(x));
-	var folders=contents.filter(content=>pathIsDirectory(content, folderLoc)).sort(),
-		files=contents.filter(content=>pathIsFile(content, folderLoc)).sort();
+		loc=getLocFromReq(req);
+	var contents=fs.readdirSync(loc).map(content=>"./"+content)
+			.concat(...getAtContents(loc, login)).map(x=>formatPathToLink(x, loc).replace("/",""))
+			.filter(content=>pathExists(content)) // "C:/System Volume Information" doesn't exist, even though it does
+			.filter(content=>isAllowedPath(content, login)) // Don't let people see the stuff they can't access
+			.filter((content, i, arr)=>arr.indexOf(content)==i), // Don't want any duplicates
+		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true, true)).sort(),
+		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true, true)).sort();
 	return {files:files, folders:folders};
 }
 function getAtContents(loc, login){
 	var viewSettings=getViewSettingsFromLogin(login),
 		ret=[];
-	if (!viewSettings.folder.handleAtFiles||!pathIsFile("@", loc)){return ret;}
-	var lines=fs.readFileSync(resolvePath("@", loc)).toString()
-			.split(/[\r\n]+/).filter(line=>!line.startsWith("//")&&line).map(content=>resolvePath(content, loc));
+	if (!viewSettings.folder.handleAtFiles||!pathIsFile(resolvePath("@", false, loc))){return ret;}
+	var lines=fs.readFileSync(resolvePath("@", false, loc)).toString().split(/[\r\n]+/)
+			.filter(x=>!x.startsWith("//")).map(x=>resolvePath(x, false, loc));
 	for (var line of lines){
 		if (pathIsDirectory(line)){
-			ret.push(...fs.readdirSync(line).map(content=>resolvePath(content, line)));
+			ret.push(...fs.readdirSync(line).map(x=>resolvePath(x, false, line)));
 			ret.push(...getAtContents(line, login));
 		}
 		ret.push(line);
 	}
-	ret=ret.map(x=>(isParentDirOrSelf(x, loc)?"./":"/")+clipBasePath(x.replace(/^\/+/, ""), loc));
 	return ret;
 }
 
@@ -399,7 +403,7 @@ function getLocFromReq(req, suffix){
 	if (config.basePath=="" || loc in config.redirects){
 		return loc;
 	} else {
-		loc=resolvePath(loc, true);
+		loc=resolvePath(loc, false, true);
 		if (loc===undefined || !isParentDirOrSelf(loc, config.basePath)){loc="";}
 		return loc;
 	}
@@ -411,19 +415,19 @@ function isAllowedPath(loc, login){
 		return config.accounts[login.username].allow.some(function(allowElem){
 			// Allowing x:/y/z/ will automatically allow x:/y/, but not the rest of its contents
 			// Note to self: resolvePath("") gives a wrong answer (probably should fix that)
-			if (allowElem.endsWith("/")!=pathIsDirectory(allowElem)){warn(`PathDir mismatch in isAllowedPath._isAllowed (${allowElem})`); return false;}
+			if (isParentDirOrSelf(absLoc, allowElem) && allowElem.endsWith("/")!=pathIsDirectory(allowElem)){warn(`PathDir mismatch in isAllowedPath._isAllowed (${allowElem})`); return false;}
 			return isParentDirOrSelf(absLoc, allowElem&&resolvePath(allowElem)) || isParentDirOrSelf(allowElem&&resolvePath(allowElem), absLoc);
 		});
 	}
 	function _isDenied(absLoc, login){
 		return config.accounts[login.username].deny.some(function(denyElem){
 			//denyElem=resolvePath(denyElem, false, true);
-			if (denyElem.endsWith("/")!=pathIsDirectory(denyElem)){warn(`PathDir mismatch in isAllowedPath._isDenied (${denyElem})`); return true;}
-			return isParentDirOrSelf(absLoc, resolvePath(denyElem, undefined, true));
+			if (isParentDirOrSelf(absLoc, denyElem) && denyElem.endsWith("/")!=pathIsDirectory(denyElem)){warn(`PathDir mismatch in isAllowedPath._isDenied (${denyElem})`); return true;}
+			return isParentDirOrSelf(absLoc, resolvePath(denyElem));
 		});
 	}
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
-	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined || !pathExists(loc)){return false;}
+	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined){return false;}
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
 	absLoc=resolvePath(loc);
 	if (isParentDirOrSelf(absLoc, resolvePath(__dirname)) || absLoc==resolvePath(kwargs.config)){return false;}
@@ -528,10 +532,10 @@ function validateConfig(config){
 	for (let account in config.accounts){
 		let accountData=config.accounts[account];
 		for (let allowElem in accountData.allow){
-			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], config.basePath)
+			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, config.basePath)
 		}
 		for (let denyElem in accountData.deny){
-			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], config.basePath)
+			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, config.basePath)
 		}
 	}
 	if (config.httpPort===undefined){warn("Defaulting httpPort to 80"); config.httpPort=80;}
