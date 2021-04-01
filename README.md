@@ -56,7 +56,9 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 			"imageMode":"link",
 			"imageRegex":"\\.(a?png|j(pe?g|fif)|gif|bmp)$",
 			"videoMode":"link",
-			"videoRegex":"\\.(mp4|mov|webm|mkv)$"
+			"videoRegex":"\\.(mp4|mov|webm|mkv)$",
+			"handleLNKFiles":true,
+			"handleAtFiles":true
 		}
 	},
 	"defaultUploadLoc":"./files",
@@ -65,12 +67,11 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 	"useHTTPS":false,
 	"httpsKey":"key.pem",
 	"httpsCert":"cert.pem",
+	"httpPort":80,
+	"httpsPort":443,
 	"maxFileSize":"50MiB",
-	"basePath":"",
-	"handleLNKFiles":true,
-	"handleAtFiles":true
+	"basePath":""
 }
-
 ```
 
 ## Config documentation
@@ -109,7 +110,10 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 - `useHTTPS`: Either `true` or `false`, determines whether or not to use HTTPS
 - `httpsKey`: The path to an HTTPS key (only tested with .pem files)
 - `httpsCert`: The path to an HTTPS cert (only tested with .pem files)
-- `basePath`: A single folder for filebrowser to access instead of the entire computer. Currently experimental (keep as `""` to reveal whole computer)
+
+### Other
+
+- `basePath`: A single folder for filebrowser to access instead of the entire computer. Currently experimental (`""` acts as no basePath)
 
 
 # License

@@ -57,7 +57,7 @@ server.get("/", function(req, res){
 	var login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req),
-		time=new Date().getTime(),
+		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Requested root (/)`, login, req);
 	if (loc!=""){
@@ -69,7 +69,7 @@ server.get("/", function(req, res){
 			hideBack:true,
 			cache:viewSettings.cacheViews, filename:"folder"
 		});
-		logRes(`Responded with folderView at basePath ${config.basePath}`, login, req, time);
+		logRes(`Responded with folderView at basePath ${config.basePath}`, login, req, startTime);
 	} else {
 		res.render("drives", {
 			drives:getDriveData(login),
@@ -79,7 +79,7 @@ server.get("/", function(req, res){
 			title:"Drive selection",
 			cache:viewSettings.cacheViews, filename:"drives"
 		});
-		logRes(`Responded with driveView`, login, req, time);
+		logRes(`Responded with driveView`, login, req, startTime);
 	}
 });
 
@@ -104,22 +104,22 @@ server.post("/login", function(req, res){
 // Upload form
 server.get("/uploadForm", function(req, res){
 	var login=getLoginFromReq(req),
-		time=new Date().getTime(),
+		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Loaded /uploadForm`, login, req);
 	if (isAllowedPath("uploadForm", login)){
 		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:viewSettings.cacheViews, filename:"uploadForm"});
-		logRes(`Responded with uploadFormView`, login, req, time);
+		logRes(`Responded with uploadFormView`, login, req, startTime);
 	} else {
 		sendError(req, res, {code:403, username:login.username, loc:"uploadForm"});
-		logRes(`Responded with 403`, login, req, time);
+		logRes(`Responded with 403`, login, req, startTime);
 	}
 });
 
 // Upload handler
 server.post('/upload', function(req, res){
 	var login=getLoginFromReq(req),
-		time=new Date().getTime(),
+		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Attempting to upload a file`, login, req);
 	if (isAllowedPath("upload", login)){
@@ -136,12 +136,12 @@ server.post('/upload', function(req, res){
 					filePath=path.join(uploadFolder, `${new Date().getTime()}-${login.username}-${req.file.originalname}`);
 				moveFile(req.file.path, filePath); // fs.renameSync failes when moving between drives
 				res.render("uploaded", {"file":req.file.originalname, username:login.username, cache:viewSettings.cacheViews, filename:"uploaded"});
-				logRes(`Successfully uploaded file`, login, req, time);
+				logRes(`Successfully uploaded file`, login, req, startTime);
 			}
 		});
 	} else {
 		sendError(req, res, {code:403, username:login.usernam, loc:"upload"});
-		logRes(`Upload rejected with status 403`, login, req, time);
+		logRes(`Upload rejected with status 403`, login, req, startTime);
 	}
 });
 
@@ -149,19 +149,19 @@ server.post('/upload', function(req, res){
 server.get("/**.lnk", function(req, res){
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req, ".lnk"),
-		time=new Date().getTime(),
+		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
-	if (viewSettings.handleLNKFiles){
+	if (viewSettings.folder.handleLNKFiles){
 		logReq(`Loaded LNK file at "${loc}"`, login, req);
 		if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
 			sendError(req, res, {code:403, username:login.username, loc:loc});
-			logRes(`Responded with 403 for "${loc}"`, login, res, time);
+			logRes(`Responded with 403 for "${loc}"`, login, res, startTime);
 		} else if (loc in config.redirects){
 			res.redirect("/"+clipBasePath(config.redirects[loc]));
-			logRes(`Redirected to "${clipBasePath(config.redirects[loc])}" via config.redirects`, login, req, time);
+			logRes(`Redirected to "${clipBasePath(config.redirects[loc])}" via config.redirects`, login, req, startTime);
 		} else {
 			res.redirect("/"+clipBasePath(getLnkLoc(loc)));
-			logRes(`Redirected to "${clipBasePath(getLnkLoc(loc))}" via LNK file`, login, req, time);
+			logRes(`Redirected to "${clipBasePath(getLnkLoc(loc))}" via LNK file`, login, req, startTime);
 		}
 	} else {
 		elseViewHandler(req, res);
@@ -171,26 +171,26 @@ server.get("/**.lnk", function(req, res){
 // Folder/file server
 server.get("/*", elseViewHandler);
 function elseViewHandler(req, res){
-	var time=new Date().getTime(),
+	var startTime=new Date().getTime(),
 		login=getLoginFromReq(req),
 		rawLoc=req.params[0],
 		loc=getLocFromReq(req),
 		loguser=login.username||"default username",
-		time=new Date().getTime(),
+		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Requested "${rawLoc}"`, login, req);
 	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
-		logRes(`Responded with 403 for "${rawLoc}"`, login, req, time);
+		logRes(`Responded with 403 for "${rawLoc}"`, login, req, startTime);
 	} else if (rawLoc in config.redirects){
 		// Handle redirects
 		res.redirect("/"+clipBasePath(config.redirects[loc]));
-		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}"`, login, req, time);
+		logRes(`Redirected to "${clipBasePath(config.redirects[loc])}"`, login, req, startTime);
 	} else if (!pathExists(loc)){
 		// File/dir not found
 		sendError(req, res, {code:404, username:login.username, loc:rawLoc});
-		logRes(`Responded with 404 for "${rawLoc}"`, login, req, time)
+		logRes(`Responded with 404 for "${rawLoc}"`, login, req, startTime)
 	} else if (pathIsDirectory(loc)){
 		// Send directory view
 		res.render("folder", {
@@ -200,7 +200,7 @@ function elseViewHandler(req, res){
 			hideBack:false,
 			cache:viewSettings.cacheViews, filename:"folder"
 		});
-		logRes(`Responded with folderView for "${rawLoc}"`, login, req, time);
+		logRes(`Responded with folderView for "${rawLoc}"`, login, req, startTime);
 	} else {
 		// Send file
 		if ("thumbnail" in req.query && viewSettings.folder.imageRegex.test(loc)){
@@ -221,12 +221,12 @@ function elseViewHandler(req, res){
 			});
 			stream.on("close", function(){
 				res.end();
-				logRes(`Generated thumbnail for "${rawLoc}"`, login, req, time);
+				logRes(`Generated thumbnail for "${rawLoc}"`, login, req, startTime);
 			});
 			//}
 		} else {
 			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
-			logRes(`Sent file "${rawLoc}"`, login, req, time);
+			logRes(`Sent file "${rawLoc}"`, login, req, startTime);
 		}
 	}
 }
@@ -257,9 +257,9 @@ function logReq(text, login, req){
 		console.log(`${login.username||"default user"} at ${req.ip}: ${text}`);
 	}
 }
-function logRes(text, login, req, time){
+function logRes(text, login, req, startTime){
 	if (kwargs.log_res){
-		console.log(`${login.username||"default user"} at ${req.ip}: ${text}${time===undefined?"":` (time: ${Math.floor((new Date().getTime()-time)/100)/10}s)`}`);
+		console.log(`${login.username||"default user"} at ${req.ip}: ${text}${startTime===undefined?"":` (time: ${Math.floor((new Date().getTime()-startTime)/100)/10}s)`}`);
 	}
 }
 
@@ -277,6 +277,7 @@ function pathIsFile(loc){
 function pathExists(loc){
 	try {
 		fs.lstatSync(loc);
+		if (fs.lstatSync(loc).isDirectory()!=loc.endsWith("/")){return false;}
 		var resLoc=path.resolve(loc).replace(/\\/g, "/");
 		if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
 		return resolvePath(loc, true)===resLoc;
@@ -292,15 +293,15 @@ function moveFile(oldLoc, newLoc){
 		fs.rmSync(oldLoc);
 	}
 }
-function resolvePath(loc, fixCase, basePathOverride){
-	if (basePathOverride===true){basePathOverride=config.basePath;}
-	loc=path.resolve(basePathOverride||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
+function resolvePath(loc, fixCase, parentLoc){
+	if (parentLoc===true){parentLoc=config.basePath;}
+	loc=path.resolve(parentLoc||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
 	try {
 		if (fixCase){
 			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
 		}
 		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
-	} catch {warn(`resolvePath was given a non-existent loc ("${loc}", ${fixCase}, "${basePathOverride}")`)}
+	} catch {warn(`resolvePath was given a non-existent loc ("${loc}", ${fixCase}, "${parentLoc}")`);}
 	return loc;
 }
 function isParentDirOrSelf(loc, parentLoc){
@@ -313,11 +314,11 @@ function isParentDirOrSelf(loc, parentLoc){
 	parentLoc=parentLoc.split("/").filter(x=>x!="");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
 }
-function clipBasePath(loc, basePathOverride){
-	if (basePathOverride===undefined){basePathOverride=config.basePath;}
+function clipBasePath(loc, parentLoc){
+	if (parentLoc===undefined){parentLoc=config.basePath;}
 	//if (!isParentDirOrSelf(loc, basePath)){throw new Error(`clipBasePath recieved a loc that doesn't start with config.basePath ("${loc}")`)}
-	if (!isParentDirOrSelf(loc, basePathOverride)){return loc}
-	return loc.split("/").splice(basePathOverride.split("/").filter(x=>x!="").length).join("/");
+	if (!isParentDirOrSelf(loc, parentLoc)){return loc}
+	return loc.split("/").splice(parentLoc.split("/").filter(x=>x!="").length).join("/");
 }
 
 // Drive/folder
@@ -328,14 +329,14 @@ function getDriveData(login){
 		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
 		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
 }
-function formatPathToLink(loc, parent, relative, doBasePath){
+function formatPathToLink(loc, parent, relative){
 	if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
 	loc=resolvePath(loc, false, parent);
 	if (relative){
 		loc=clipBasePath(loc, parent);
 	}
 	if (/^[a-z]:/i.test(loc)){
-		if (doBasePath){loc=clipBasePath(loc)}
+		loc=clipBasePath(loc);
 		loc="/"+loc;
 	} else {
 		loc="./"+loc;
@@ -347,12 +348,12 @@ function getFolderContents(req){
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req);
 	var contents=fs.readdirSync(loc).map(content=>"./"+content)
-			.concat(...getAtContents(loc, login)).map(x=>formatPathToLink(x, loc).replace("/",""))
+			.concat(...getAtContents(loc, login)).map(x=>resolvePath(x, false, loc))
 			.filter(content=>pathExists(content)) // "C:/System Volume Information" doesn't exist, even though it does
 			.filter(content=>isAllowedPath(content, login)) // Don't let people see the stuff they can't access
 			.filter((content, i, arr)=>arr.indexOf(content)==i), // Don't want any duplicates
-		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true, true)).sort(),
-		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true, true)).sort();
+		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true)).sort(),
+		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true)).sort();
 	return {files:files, folders:folders};
 }
 function getAtContents(loc, login){
@@ -388,7 +389,7 @@ function getLoginFromReq(req){
 }
 function validateLogin(login){
 	if (typeof login!="object" || !("username" in login) || !("password" in login)){
-		warn("validateLogin recieved an invalid login afgument");
+		warn("validateLogin recieved an invalid login argument");
 		return false;
 	}
 	if (!(login.username in config.accounts)){
@@ -635,7 +636,7 @@ function validateConfig(config){
 }
 function getViewSettingsFromLogin(login){
 	// Annoyingly lone lines of code get sentenced to isolation
-	if (!("viewSettings" in config.accounts[login.username])){return config.viewSettings;}
+	if (!(login.username in config.accounts) || !("viewSettings" in config.accounts[login.username])){return config.viewSettings;}
 	return assignNonObjectsRecursivelyImmutable(config.viewSettings, config.accounts[login.username].viewSettings);
 }
 function assignNonObjectsRecursivelyImmutable(baseObject, overwriteObject){
