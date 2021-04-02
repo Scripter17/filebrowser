@@ -26,7 +26,7 @@ kwargs=parser.parse_args();
 // Get and validate config
 getConfig();
 
-// Handle -hash
+// Handle --hash
 if (kwargs.hash!=undefined){
 	console.log(hash(kwargs.hash));
 	process.exit();
@@ -72,7 +72,7 @@ server.get("/", function(req, res){
 		logRes(`Responded with folderView at basePath ${config.basePath}`, login, req, startTime);
 	} else {
 		res.render("drives", {
-			drives:getDriveData(login),
+			drives:getDrives(login),
 			username:login.username,
 			canUpload:isAllowedPath("uploadForm", login),
 			redirects:Object.keys(config.redirects).filter(redirect=>isAllowedPath(redirect, login)),
@@ -178,7 +178,7 @@ function elseViewHandler(req, res){
 		loguser=login.username||"default username",
 		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
-	logReq(`Requested "${rawLoc}"`, login, req);
+	logReq(`Requested "${rawLoc}${"thumbnail" in req.query?"?thumbnail":""}"`, login, req);
 	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
@@ -205,25 +205,23 @@ function elseViewHandler(req, res){
 		// Send file
 		if ("thumbnail" in req.query && viewSettings.folder.imageRegex.test(loc)){
 			logRes(`Generating thumbnail for "${rawLoc}"`, login, req);
-			//var imageSize=/\d+x\d+/.exec(child_process.spawnSync("magick", ["identify", loc]).stdout)[0].split("x").map(x=>parseInt(x));
-			//if (imageSize[0]*imageSize[1]>=10000*10000){
-			//	res.sendFile(path.resolve("resources/TooBig.png"));
-			//} else {
 			res.set("Content-Type", "image/jpeg");
-			let stream=child_process.spawn( // Note to self: var x is the same between loops, whereas let x is different
+			let stream=child_process.spawn( // Note to self: var preserves address whereas let doesn't
 				"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
 				{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("1GiB")}}
 			);
 			stream.stdout.on("data", function(data){res.write(Buffer.from(data));});
 			req.on("close", function(){
-				// logRes(`Killing write stream for "${rawLoc}"`, login, req); // Runs on normal req end :/
-				stream.kill();
+				if (stream.exitCode==null){stream.kill();}
 			});
-			stream.on("close", function(){
+			stream.on("close", function(code){
 				res.end();
-				logRes(`Generated thumbnail for "${rawLoc}"`, login, req, startTime);
+				if (code==null){
+					logRes(`Thumbnail gneration for "${rawLoc}" terminated early`, login, req, startTime);
+				} else {
+					logRes(`Generated thumbnail for "${rawLoc}"`, login, req, startTime);
+				}
 			});
-			//}
 		} else {
 			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
 			logRes(`Sent file "${rawLoc}"`, login, req, startTime);
@@ -259,7 +257,8 @@ function logReq(text, login, req){
 }
 function logRes(text, login, req, startTime){
 	if (kwargs.log_res){
-		console.log(`${login.username||"default user"} at ${req.ip}: ${text}${startTime===undefined?"":` (time: ${Math.floor((new Date().getTime()-startTime)/100)/10}s)`}`);
+		var timeText=startTime===undefined?"":` (time: ${Math.floor((new Date().getTime()-startTime)/100)/10}s)`;
+		console.log(`${login.username||"default user"} at ${req.ip}: ${text}${timeText}`);
 	}
 }
 
@@ -277,11 +276,11 @@ function pathIsFile(loc){
 function pathExists(loc){
 	try {
 		fs.lstatSync(loc);
-		if (fs.lstatSync(loc).isDirectory()!=loc.endsWith("/")){return false;}
-		var resLoc=path.resolve(loc).replace(/\\/g, "/");
-		if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
-		return resolvePath(loc, true)===resLoc;
 	} catch {return false;}
+	if (fs.lstatSync(loc).isDirectory()!=loc.endsWith("/")){return false;}
+	var resLoc=path.resolve(loc).replace(/\\/g, "/");
+	if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
+	return resolvePath(loc, true)===resLoc;
 }
 function moveFile(oldLoc, newLoc){
 	// Idea taken from https://stackoverflow.com/a/29105404/10720231
@@ -306,24 +305,18 @@ function resolvePath(loc, fixCase, parentLoc){
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
-	var ln=loc===null, pln=parentLoc===null;
-	if (loc===null){warn(`Null passed into isParentDirOrSelf (${ln?"loc":""}${ln&&pln?" & ":""}${pln?"parentLoc":""})`);}
-	if (ln || pln){return false;}
-	if (loc===undefined){throw new Error("a")}
 	loc=loc.split("/").filter(x=>x!="");
 	parentLoc=parentLoc.split("/").filter(x=>x!="");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
 }
 function clipBasePath(loc, parentLoc){
 	if (parentLoc===undefined){parentLoc=config.basePath;}
-	//if (!isParentDirOrSelf(loc, basePath)){throw new Error(`clipBasePath recieved a loc that doesn't start with config.basePath ("${loc}")`)}
 	if (!isParentDirOrSelf(loc, parentLoc)){return loc}
 	return loc.split("/").splice(parentLoc.split("/").filter(x=>x!="").length).join("/");
 }
 
 // Drive/folder
-function getDriveData(login){
-	// TODO: Make this entire script support Linux
+function getDrives(login){
 	return child_process.execSync("wmic logicaldisk get name")
 		.toString().replace(/ /g, "").split(/[\n\r]+/) // Extract non-empty lines
 		.filter(x=>/[A-Za-z]:/.test(x)).map(x=>x+"/") // Filter out non-drive lines
@@ -346,8 +339,8 @@ function formatPathToLink(loc, parent, relative){
 }
 function getFolderContents(req){
 	var login=getLoginFromReq(req),
-		loc=getLocFromReq(req);
-	var contents=fs.readdirSync(loc).map(content=>"./"+content)
+		loc=getLocFromReq(req),
+		contents=fs.readdirSync(loc).map(content=>"./"+content)
 			.concat(...getAtContents(loc, login)).map(x=>resolvePath(x, false, loc))
 			.filter(content=>pathExists(content)) // "C:/System Volume Information" doesn't exist, even though it does
 			.filter(content=>isAllowedPath(content, login)) // Don't let people see the stuff they can't access
@@ -374,7 +367,7 @@ function getAtContents(loc, login){
 
 // Login/Validation
 function hash(text, saltOverride, typeOverride){
-	// Hash used for passwords. Hash type and salt are set in config.json
+	// Hash used for passwords. Hash type and salt are set in the config
 	if (text===undefined){
 		throw new Error("Provided hashstring is undefined (the type, not a string)");
 	}
@@ -384,6 +377,7 @@ function hash(text, saltOverride, typeOverride){
 }
 function getLoginFromReq(req){
 	// If the provided login is invalid, treat it as an empty login
+	// Logging in normally sets the login cookies to empty, but this just makes sure in the case the user changes the cookies manually
 	var rawReqLogin={username: req.cookies.username || "", password:req.cookies.password || ""};
 	return validateLogin(rawReqLogin) ? rawReqLogin : {username:"", password:""};
 }
@@ -430,7 +424,7 @@ function isAllowedPath(loc, login){
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
 	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined){return false;}
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
-	absLoc=resolvePath(loc);
+	var absLoc=resolvePath(loc);
 	if (isParentDirOrSelf(absLoc, resolvePath(__dirname)) || absLoc==resolvePath(kwargs.config)){return false;}
 	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (config.handleLNKFiles && isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
 }
@@ -438,7 +432,6 @@ function isAllowedPath(loc, login){
 // Error handler
 function sendError(req, res, args){
 	// Got sick of doing this all over the place
-	// Todo: Put the special errors (such as the 400's in the thumbnail code) in errorDescs
 	var viewSettings=getViewSettingsFromLogin({username:args.username});
 	var errorDescs={
 		403:"File/Directory is not available for this login, assuming it exists",
@@ -452,7 +445,6 @@ function sendError(req, res, args){
 		username:args.username,
 		cache:viewSettings.cacheViews, filename:"error"
 	});
-	// Todo: Maybe log IP?
 	warn(`${args.username || "default user"} at ${req.ip}: Error ${args.code} "${args.desc || errorDescs[args.code]} (${args.loc || "unknown loc"})"`);
 }
 
@@ -462,6 +454,7 @@ function getLnkLoc(lnkPath, skipValidation){
 	// Also todo: Replace LNKs entirely by using the @ system I used to use
 	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
 	if (!skipValidation && !isLnkLoc(lnkPath)){
+		// Gotta love having to avoid stackoverflows
 		warn(`getLnkLoc returned null ("${lnkPath}")`);
 		return null;
 	}
@@ -484,6 +477,7 @@ function isLnkLoc(lnkPath){
 // Sizestring for uploading
 function sizeStringToBytes(sizeStr){
 	if (sizeStr==-1){
+		// JSON files don't support Infinity :/
 		return Infinity;
 	}
 	if (typeof sizeStr=="number"){
@@ -496,7 +490,7 @@ function sizeStringToBytes(sizeStr){
 			"gb":1000**3,"gib":1024**3,
 			"tb":1000**4,"tib":1024**4 // Because I can
 		},
-		parseRegex=/^(\d+)(([KMGT]i?)?[B])$/i,
+		parseRegex=/^(\d+\.?\d*)((?:[KMGT]i?)?[B])$/i,
 		parsed=parseRegex.exec(sizeStr);
 	return parseFloat(parsed[1])*unitMap[parsed[2].toLowerCase()];
 }
