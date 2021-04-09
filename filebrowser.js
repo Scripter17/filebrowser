@@ -349,16 +349,22 @@ function getFolderContents(req){
 		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true)).sort();
 	return {files:files, folders:folders};
 }
-function getAtContents(loc, login){
+function getAtContents(loc, login, processed){
 	var viewSettings=getViewSettingsFromLogin(login),
 		ret=[];
+	processed||=[];
+	if (processed.indexOf(loc)!=-1){
+		return ret
+	} else {
+		processed.push(loc);
+	}
 	if (!viewSettings.folder.handleAtFiles||!pathIsFile(resolvePath("@", false, loc))){return ret;}
 	var lines=fs.readFileSync(resolvePath("@", false, loc)).toString().split(/[\r\n]+/)
-			.filter(x=>!x.startsWith("//")).map(x=>resolvePath(x, false, loc));
+			.filter(x=>x!="").map(x=>/^[ \t]*(.+?)[ \t]*$/.exec(x.split("//")[0])[1]).map(x=>resolvePath(x, false, loc));
 	for (var line of lines){
 		if (pathIsDirectory(line)){
 			ret.push(...fs.readdirSync(line).map(x=>resolvePath(x, false, line)));
-			ret.push(...getAtContents(line, login));
+			ret.push(...getAtContents(line, login, processed));
 		}
 		ret.push(line);
 	}
