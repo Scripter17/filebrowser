@@ -1,20 +1,8 @@
-Features:
-- Make this work on Linux and Mac
-- Per-user stuff
- - Upload folders ✓
- - Upload size limits (Not possible ATM)
- - Folder view settings ✓
- - Redirects
-- Machine-readable mode (send JSON files instead of HTML)
-- Darkmode
-- Add the @ system ✓
-- GUI mode?
-- Download folders (zip files?)
+Features
+	- Optional glob support (globAllow and globDeny?)
+	- CLI account making
+	- GUI mode (probably never happening)
 
-Technical:
-- Automated testing PLEASE ✓ (for config)
-- Pass config data from CLI
-- Don't store passwords in the cookie as plaintext
-- Stop using 400 for everything?
-- Make thumbnail generation take less CPU (hard cap on CPU usage, not more efficiency)
-- STANDARDIZE VARIABLE NAMES AND PARAMATER ORDER
+Technical
+	- Better/more comments
+	- Better config validation

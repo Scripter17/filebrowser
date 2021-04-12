@@ -190,7 +190,7 @@ function elseViewHandler(req, res){
 	} else if (!pathExists(loc)){
 		// File/dir not found
 		sendError(req, res, {code:404, username:login.username, loc:rawLoc});
-		logRes(`Responded with 404 for "${rawLoc}"`, login, req, startTime)
+		logRes(`Responded with 404 for "${rawLoc}"`, login, req, startTime);
 	} else if (pathIsDirectory(loc)){
 		// Send directory view
 		res.render("folder", {
@@ -323,6 +323,7 @@ function getDrives(login){
 		.filter(drive=>isAllowedPath(drive, login)); // Filter for drives the user can access
 }
 function formatPathToLink(loc, parent, relative){
+	// Lots of stringjank
 	if (loc[0]=="/"){loc=loc.substr(1, loc.length-1);}
 	loc=resolvePath(loc, false, parent);
 	if (relative){
@@ -337,31 +338,53 @@ function formatPathToLink(loc, parent, relative){
 	if (pathIsDirectory(loc) && !loc.endsWith("/")){loc+="/";}
 	return loc;
 }
+
 function getFolderContents(req){
+	function sortFunction(f1, f2){
+		var parseFileName=x=>[
+				path.basename(x, path.extname(x)).replace(/\d+$/, ""),
+				parseInt((/\d+$/.exec(path.basename(x, path.extname(x)))||["0"])[0]),
+				path.extname(x)
+			],
+			miniSort=(x,y)=>(x>y)-(x<y);
+		if (typeof f1=="string"){f1=parseFileName(f1);}
+		if (typeof f2=="string"){f2=parseFileName(f2);}
+		return miniSort(f1[0], f2[0]) || miniSort(f1[1], f2[1]) || miniSort(f1[2], f2[2]);
+	}
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req),
-		contents=fs.readdirSync(loc).map(content=>"./"+content)
-			.concat(...getAtContents(loc, login)).map(x=>resolvePath(x, false, loc))
+		contents=fs.readdirSync(loc).map(content=>resolvePath(content, false, loc))
+			.concat(...(fs.readdirSync(loc).indexOf("@")!=-1?getAtContents(loc, login):[])) // Append atfile contents
 			.filter(content=>pathExists(content)) // "C:/System Volume Information" doesn't exist, even though it does
 			.filter(content=>isAllowedPath(content, login)) // Don't let people see the stuff they can't access
 			.filter((content, i, arr)=>arr.indexOf(content)==i), // Don't want any duplicates
-		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true)).sort(),
-		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true)).sort();
+		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true)).sort(sortFunction),
+		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true)).sort(sortFunction);
 	return {files:files, folders:folders};
 }
 function getAtContents(loc, login, processed){
+	// An atfile is a file just called @ in a folder
+	// The lines of an atfile refer to other folder/files relative to it
+	// Filebrowser treats the files and the contents of the folders almost like LNK files
 	var viewSettings=getViewSettingsFromLogin(login),
 		ret=[];
 	processed||=[];
 	if (processed.indexOf(loc)!=-1){
-		return ret
+		// Fixes a problem where an atfile that refers to itself gets caught in an infinite loop
+		return ret;
 	} else {
 		processed.push(loc);
 	}
-	if (!viewSettings.folder.handleAtFiles||!pathIsFile(resolvePath("@", false, loc))){return ret;}
+	if (!viewSettings.folder.handleAtFiles || !pathIsFile(resolvePath("@", false, loc))){
+		// If the user has atfiles disabled or there isn't one, just return an empty array
+		return ret;
+	}
 	var lines=fs.readFileSync(resolvePath("@", false, loc)).toString().split(/[\r\n]+/)
-			.filter(x=>x!="").map(x=>/^[ \t]*(.+?)[ \t]*$/.exec(x.split("//")[0])[1]).map(x=>resolvePath(x, false, loc));
+			.map(x=>/^[ \t]*(.*?)[ \t]*$/.exec(x.split("//")[0])[1]) // Strips leading/tailing whitespaces as well as comments
+			.filter(x=>x!="") // Have to do this afterwards because "  // xyz" needs to be filtered too
+			.map(x=>resolvePath(x, false, loc)); // Handles relative paths
 	for (var line of lines){
+		line=resolvePath(line, false, loc);
 		if (pathIsDirectory(line)){
 			ret.push(...fs.readdirSync(line).map(x=>resolvePath(x, false, line)));
 			ret.push(...getAtContents(line, login, processed));
@@ -457,8 +480,6 @@ function sendError(req, res, args){
 // LNK/redirect handling
 function getLnkLoc(lnkPath, skipValidation){
 	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
-	// Also todo: Replace LNKs entirely by using the @ system I used to use
-	// (It was a single file in some dirs called `@` that had a list of other dirs/files to render in that dir)
 	if (!skipValidation && !isLnkLoc(lnkPath)){
 		// Gotta love having to avoid stackoverflows
 		warn(`getLnkLoc returned null ("${lnkPath}")`);
