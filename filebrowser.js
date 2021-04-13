@@ -60,6 +60,7 @@ server.get("/", function(req, res){
 		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Requested root (/)`, login, req);
+	res.setHeader("Permissions-Policy", "interest-cohort=()");
 	if (loc!=""){
 		// If the basePath is set, there's no sense is returning driveView
 		res.render("folder", {
@@ -87,6 +88,7 @@ server.get("/", function(req, res){
 server.post("/login", function(req, res){
 	var login=req.body;
 	logReq(`Attempting login`, login, req);
+	res.setHeader("Permissions-Policy", "interest-cohort=()");
 	if (!validateLogin(login)){
 		logRes(`Invalid login`, login, req);
 		warn(`Invalid login attempt: ${JSON.stringify({username:login.username, password:login.password})}`)
@@ -107,6 +109,7 @@ server.get("/uploadForm", function(req, res){
 		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Loaded /uploadForm`, login, req);
+	res.setHeader("Permissions-Policy", "interest-cohort=()");
 	if (isAllowedPath("uploadForm", login)){
 		res.render("uploadForm", {username:login.username, maxFileSize:config.maxFileSize, cache:viewSettings.cacheViews, filename:"uploadForm"});
 		logRes(`Responded with uploadFormView`, login, req, startTime);
@@ -122,6 +125,7 @@ server.post('/upload', function(req, res){
 		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Attempting to upload a file`, login, req);
+	res.setHeader("Permissions-Policy", "interest-cohort=()");
 	if (isAllowedPath("upload", login)){
 		uploadHandler(req, res, function (err){
 			if (err instanceof multer.MulterError){ // TODO: Detect only file too large errors
@@ -151,6 +155,7 @@ server.get("/**.lnk", function(req, res){
 		loc=getLocFromReq(req, ".lnk"),
 		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
+	res.setHeader("Permissions-Policy", "interest-cohort=()");
 	if (viewSettings.folder.handleLNKFiles){
 		logReq(`Loaded LNK file at "${loc}"`, login, req);
 		if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
@@ -179,6 +184,7 @@ function elseViewHandler(req, res){
 		startTime=new Date().getTime(),
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Requested "${rawLoc}${"thumbnail" in req.query?"?thumbnail":""}"`, login, req);
+	res.setHeader("Permissions-Policy", "interest-cohort=()");
 	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
