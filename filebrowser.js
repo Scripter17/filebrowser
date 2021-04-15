@@ -283,8 +283,9 @@ function pathExists(loc){
 	try {
 		fs.lstatSync(loc);
 	} catch {return false;}
-	if (fs.lstatSync(loc).isDirectory()!=loc.endsWith("/")){return false;}
 	var resLoc=path.resolve(loc).replace(/\\/g, "/");
+	if (fs.lstatSync(loc).isDirectory()!=loc.endsWith("/")){return false;}
+	if (loc.indexOf("//")!=-1){return false;}
 	if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
 	return resolvePath(loc, true)===resLoc;
 }
