@@ -9,6 +9,8 @@ fs=require("fs");
 crypto=require("crypto");
 child_process=require("child_process");
 
+console.log("Starting Filebrowser (current timestamp:"+getTime()+")")
+
 // == INITIALIZATION ==
 
 // Argument parsing
@@ -23,9 +25,9 @@ parser.add_argument("--hard-warn", {help:"Throw errors instead of warnings",    
 parser.add_argument("--log-req",   {help:"Log every request  made by any user", action :"store_true"});
 parser.add_argument("--log-res",   {help:"Log every response sent to any user", action :"store_true"});
 kwargs=parser.parse_args();
+kwargs.config=resolvePath(kwargs.config, false, process.cwd())
 // Get and validate config
 getConfig();
-
 // Handle --hash
 if (kwargs.hash!=undefined){
 	console.log(hash(kwargs.hash));
@@ -253,40 +255,52 @@ function warn(text){
 		throw new Error("Warning issued with --hard-warn enabled: "+text);
 	}
 	if (!kwargs.no_warn){
-		console.warn(text);
+		console.warn(getTime(), text);
 	}
 }
 function logReq(text, login, req){
 	if (kwargs.log_req){
-		console.log(`${login.username||"default user"} at ${req.ip}: ${text}`);
+		console.log(getTime(), `${login.username||"default user"} at ${req.ip}: ${text}`);
 	}
 }
 function logRes(text, login, req, startTime){
 	if (kwargs.log_res){
 		var timeText=startTime===undefined?"":` (time: ${Math.floor((new Date().getTime()-startTime)/100)/10}s)`;
-		console.log(`${login.username||"default user"} at ${req.ip}: ${text}${timeText}`);
+		console.log(getTime(), `${login.username||"default user"} at ${req.ip}: ${text}${timeText}`);
 	}
+}
+function getTime(dateOverride){
+	dateOverride||=new Date();
+	var timePieces=[
+		dateOverride.getFullYear(),
+		dateOverride.getMonth(),
+		dateOverride.getDay(),
+		dateOverride.getHours(),
+		dateOverride.getMinutes(),
+		dateOverride.getSeconds()
+	].map(x=>(x<10?"0":"")+x);
+	return [timePieces.splice(3), timePieces].reverse().map(x=>x.join("-")).join("_");
 }
 
 // Generic filesystem
-function pathIsDirectory(loc){
+function pathIsDirectory(loc, parentLoc){
 	//try {
-		return pathExists(loc) && fs.lstatSync(loc).isDirectory();
+		return pathExists(loc, parentLoc) && fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathIsFile(loc){
+function pathIsFile(loc, parentLoc){
 	//try {
-		return pathExists(loc) && !fs.lstatSync(loc).isDirectory();
+		return pathExists(loc, parentLoc) && !fs.lstatSync(loc).isDirectory();
 	//} catch {return false;}
 }
-function pathExists(loc){
+function pathExists(loc, parentLoc){
 	try {
 		fs.lstatSync(loc);
 	} catch {return false;}
 	if (fs.lstatSync(loc).isDirectory()!=loc.endsWith("/")){return false;}
 	var resLoc=path.resolve(loc).replace(/\\/g, "/");
 	if (fs.lstatSync(resLoc).isDirectory() && !resLoc.endsWith("/")){resLoc+="/";}
-	return resolvePath(loc, true)===resLoc;
+	return resolvePath(loc, true, parentLoc)===resLoc;
 }
 function moveFile(oldLoc, newLoc){
 	// Idea taken from https://stackoverflow.com/a/29105404/10720231
@@ -300,19 +314,24 @@ function moveFile(oldLoc, newLoc){
 }
 function resolvePath(loc, fixCase, parentLoc){
 	if (parentLoc===true){parentLoc=config.basePath;}
-	loc=path.resolve(parentLoc||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
+	if (loc[1]!=":" && (parentLoc||"")[1]!=":"){warn(`resolvePath called with relative loc and parentLoc ("${loc}", "${parentLoc}")`);}
+	var retLoc=path.resolve(parentLoc||"", loc).replace(/\\/g, "/");
 	try {
 		if (fixCase){
-			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
+			retLoc=fs.realpathSync.native(retLoc).replace(/\\/g, "/");
 		}
-		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
+		if ((fs.lstatSync(retLoc).isDirectory() || loc.endsWith("/")) && !retLoc.endsWith("/") && loc.endsWith("/")){retLoc+="/";}
 	} catch {warn(`resolvePath was given a non-existent loc ("${loc}", ${fixCase}, "${parentLoc}")`);}
-	return loc;
+	return retLoc;
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
-	loc=loc.split("/").filter(x=>x!="");
-	parentLoc=parentLoc.split("/").filter(x=>x!="");
+	if (parentLoc===""){return true;}
+	if (!parentLoc.endsWith("/")){
+		warn(`isParentDirOrSelf called with a parentLoc that doesn't end in "/" ("${loc}", "${parentLoc}")`);
+	}
+	loc=loc.split("/");
+	parentLoc=parentLoc.replace(/\/$/,"").split("/");
 	return parentLoc.every((x,i)=>loc[i]==parentLoc[i]);
 }
 function clipBasePath(loc, parentLoc){
@@ -429,8 +448,8 @@ function validateLogin(login){
 	return config.accounts[login.username].passHash===hash(login.password);
 }
 function getLocFromReq(req, suffix){
-	var loc=(req.params[0]||"")+(suffix||"");
-	if (config.basePath=="" || loc in config.redirects){
+	var loc=(req.params[0]||"")+(suffix||""), resLoc;
+	if (loc in config.redirects){
 		return loc;
 	} else {
 		loc=resolvePath(loc, false, true);
@@ -459,8 +478,12 @@ function isAllowedPath(loc, login){
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
 	if (!isParentDirOrSelf(loc, config.basePath) || !validateLogin(login) || loc===undefined){return false;}
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
-	var absLoc=resolvePath(loc);
-	if (isParentDirOrSelf(absLoc, resolvePath(__dirname)) || absLoc==resolvePath(kwargs.config)){return false;}
+	if (loc[1]!=":" && (config.basePath||"")[1]!=":"){
+		warn(`isAllowedPath called with relative loc and basePath ("${loc}", "${config.basePath}")`);
+		return false;
+	}
+	var absLoc=resolvePath(loc, false, true);
+	if (isParentDirOrSelf(absLoc, resolvePath(__dirname+"/")) || absLoc==kwargs.config){return false;}
 	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (config.handleLNKFiles && isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
 }
 
@@ -540,6 +563,7 @@ function isValidSizeString(sizeStr){
 function getConfig(){
 	// Yeah I know global variables are bad. Shut up
 	config=validateConfig(JSON.parse(fs.readFileSync(kwargs.config)));
+	console.log("===")
 }
 function validateConfig(config){
 	// Validate redirects
@@ -560,10 +584,10 @@ function validateConfig(config){
 	for (let account in config.accounts){
 		let accountData=config.accounts[account];
 		for (let allowElem in accountData.allow){
-			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, config.basePath)
+			accountData.allow[allowElem]=resolvePath(accountData.allow[allowElem], false, config.basePath);
 		}
 		for (let denyElem in accountData.deny){
-			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, config.basePath)
+			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, config.basePath);
 		}
 	}
 	if (config.httpPort===undefined){warn("Defaulting httpPort to 80"); config.httpPort=80;}
@@ -604,6 +628,7 @@ function validateConfig(config){
 			warn(`${account} has an empty password`);
 		}
 		if (typeof accountData.canUpload=="string"){
+			accountData.canUpload=resolvePath(accountData.canUpload, false, config.baseDir);
 			if (!pathExists(accountData.canUpload)){
 				throw new Error(`${account}'s upload path has been set to a nonexistent location`);
 			}
@@ -635,10 +660,11 @@ function validateConfig(config){
 			}
 		}
 	}
-	if (!pathExists(config.defaultUploadLoc)){
+	config.defaultUploadLoc=resolvePath(config.defaultUploadLoc, false, config.baseDir)
+	if (!pathExists(config.defaultUploadLoc, config.baseDir)){
 		throw new Error(`Default upload path has been set to a nonexistent location`);
 	}
-	if (!pathIsDirectory(config.defaultUploadLoc)){
+	if (!pathIsDirectory(config.defaultUploadLoc, config.baseDir)){
 		throw new Error(`Default upload path is not a directory`);
 	}
 
@@ -652,6 +678,8 @@ function validateConfig(config){
 		throw new Error(`maxFileSize is set to an invalid value ("${config.maxFileSize}")`);
 	}
 	if (config.useHTTPS){
+		config.httpsKey=resolvePath(config.httpsKey, false, process.cwd());
+		config.httpsCert=resolvePath(config.httpsCert, false, process.cwd());
 		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
 			throw new Error(`Nonexistent/non-file httpsKey provided ("${config.httpsKey}")`);
 		}
