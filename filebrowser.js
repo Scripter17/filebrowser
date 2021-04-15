@@ -23,8 +23,18 @@ parser.add_argument("--hard-warn", {help:"Throw errors instead of warnings",    
 parser.add_argument("--log-req",   {help:"Log every request  made by any user", action :"store_true"});
 parser.add_argument("--log-res",   {help:"Log every response sent to any user", action :"store_true"});
 kwargs=parser.parse_args();
-// Get and validate config
-getConfig();
+
+// Get the config then move the cwd to the script's directory
+// This resolves #1 in the stupidest way possible
+// Basically doing https://localhost/test would try to access <cwd>/test
+// This is fine for me since the way I use FB the cwd is always __dirname
+// But for people where it isn't, this ensures that the cwd is always __dirname
+// And since stuff in __dirname is always blocked (even if it's allowed by the config), this never becomes an issue
+// And to quote the TF2 source code: "todo: This is dumb"
+kwargs.config=path.resolve(kwargs.config);
+config=JSON.parse(fs.readFileSync(kwargs.config));
+process.chdir(__dirname);
+config=validateConfig(config);
 
 // Handle --hash
 if (kwargs.hash!=undefined){
@@ -537,11 +547,6 @@ function isValidSizeString(sizeStr){
 	}
 }
 
-// Config
-function getConfig(){
-	// Yeah I know global variables are bad. Shut up
-	config=validateConfig(JSON.parse(fs.readFileSync(kwargs.config)));
-}
 function validateConfig(config){
 	// Validate redirects
 	var validViewSettings={
