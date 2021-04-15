@@ -119,3 +119,7 @@ Before you can properly use FileBrowser, you need to set up config.json. This ma
 # License
 
 This project is released under the ["Don't Be a Dick"](https://dbad-license.org) public license. See LICENSE.md for more details
+
+# Special thanks
+
+- That russian guy who noticed my portforward was left on and tried to hack me, thus alerting me to the existence of [#1](https://github.com/Scripter17/filebrowser/issues/1)
