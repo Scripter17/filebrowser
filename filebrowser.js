@@ -25,16 +25,11 @@ parser.add_argument("--log-res",   {help:"Log every response sent to any user", 
 kwargs=parser.parse_args();
 
 // Get the config then move the cwd to the script's directory
-// This resolves #1 in the stupidest way possible
-// Basically doing https://localhost/test would try to access <cwd>/test
-// This is fine for me since the way I use FB the cwd is always __dirname
-// But for people where it isn't, this ensures that the cwd is always __dirname
-// And since stuff in __dirname is always blocked (even if it's allowed by the config), this never becomes an issue
-// And to quote the TF2 source code: "todo: This is dumb"
+// This used to resolve #1 but that job's been taken by elseViewHandler
 kwargs.config=path.resolve(kwargs.config);
 config=JSON.parse(fs.readFileSync(kwargs.config));
 process.chdir(__dirname);
-config=validateConfig(config);
+config=validateAndProcessConfig(config);
 
 // Handle --hash
 if (kwargs.hash!=undefined){
@@ -159,33 +154,8 @@ server.post('/upload', function(req, res){
 	}
 });
 
-// LNK handler
-server.get("/**.lnk", function(req, res){
-	var login=getLoginFromReq(req),
-		loc=getLocFromReq(req, ".lnk"),
-		startTime=new Date().getTime(),
-		viewSettings=getViewSettingsFromLogin(login);
-	res.setHeader("Permissions-Policy", "interest-cohort=()");
-	if (viewSettings.folder.handleLNKFiles){
-		logReq(`Loaded LNK file at "${loc}"`, login, req);
-		if (!isAllowedPath(loc, login)){ // Also handles if the desitnation is allowed
-			sendError(req, res, {code:403, username:login.username, loc:loc});
-			logRes(`Responded with 403 for "${loc}"`, login, res, startTime);
-		} else if (loc in config.redirects){
-			res.redirect("/"+clipBasePath(config.redirects[loc]));
-			logRes(`Redirected to "${clipBasePath(config.redirects[loc])}" via config.redirects`, login, req, startTime);
-		} else {
-			res.redirect("/"+clipBasePath(getLnkLoc(loc)));
-			logRes(`Redirected to "${clipBasePath(getLnkLoc(loc))}" via LNK file`, login, req, startTime);
-		}
-	} else {
-		elseViewHandler(req, res);
-	}
-});
-
 // Folder/file server
-server.get("/*", elseViewHandler);
-function elseViewHandler(req, res){
+server.get("/*", function(req, res){
 	var startTime=new Date().getTime(),
 		login=getLoginFromReq(req),
 		rawLoc=req.params[0],
@@ -195,8 +165,10 @@ function elseViewHandler(req, res){
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Requested "${rawLoc}${"thumbnail" in req.query?"?thumbnail":""}"`, login, req);
 	res.setHeader("Permissions-Policy", "interest-cohort=()");
-	if ((config.basePath!="" && rawLoc[1]==":") || !isAllowedPath(loc, login)){
+	console.log(loc, rawLoc)
+	if (((config.basePath!="")==(rawLoc[1]==":") && !(rawLoc in config.redirects)) || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
+		// Jank ass if statement
 		sendError(req, res, {code:403, username:login.username, loc:rawLoc});
 		logRes(`Responded with 403 for "${rawLoc}"`, login, req, startTime);
 	} else if (rawLoc in config.redirects){
@@ -238,12 +210,15 @@ function elseViewHandler(req, res){
 					logRes(`Generated thumbnail for "${rawLoc}"`, login, req, startTime);
 				}
 			});
+		} else if (viewSettings.folder.handleLNKFiles && pathIsLNK(loc)){
+			res.redirect("/"+clipBasePath(getLNKDestination(loc)));
+			logRes(`Redirected to "${clipBasePath(getLNKDestination(loc))}" via LNK file`, login, req, startTime);
 		} else {
 			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
 			logRes(`Sent file "${rawLoc}"`, login, req, startTime);
 		}
 	}
-}
+});
 
 // TODO: Built-in onionsite support?
 if (config.useHTTPS){
@@ -311,14 +286,14 @@ function moveFile(oldLoc, newLoc){
 }
 function resolvePath(loc, fixCase, parentLoc){
 	if (parentLoc===true){parentLoc=config.basePath;}
-	loc=path.resolve(parentLoc||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
+	retLoc=path.resolve(parentLoc||"", loc).replace(/\\/g, "/").replace(/^\//g, "");
 	try {
 		if (fixCase){
-			loc=fs.realpathSync.native(loc).replace(/\\/g, "/");
+			retLoc=fs.realpathSync.native(retLoc).replace(/\\/g, "/");
 		}
-		if (fs.lstatSync(loc).isDirectory() && !loc.endsWith("/")){loc+="/";}
+		if (fs.lstatSync(retLoc).isDirectory() && !retLoc.endsWith("/")){retLoc+="/";}
 	} catch {warn(`resolvePath was given a non-existent loc ("${loc}", ${fixCase}, "${parentLoc}")`);}
-	return loc;
+	return retLoc;
 }
 function isParentDirOrSelf(loc, parentLoc){
 	// Note: "Desktop.mkv".startsWith("Desktop") is true, unsurprisingly
@@ -472,6 +447,7 @@ function isAllowedPath(loc, login){
 	if (loc=="upload" || loc=="uploadForm"){return config.accounts[login.username].canUpload!=false;}
 	var absLoc=resolvePath(loc);
 	if (isParentDirOrSelf(absLoc, resolvePath(__dirname)) || absLoc==resolvePath(kwargs.config)){return false;}
+	if (config.basePath=="" && loc[1]!=":"){return false;}
 	return _isAllowed(absLoc, login) && !_isDenied(absLoc, login) && (config.handleLNKFiles && isLnkLoc(absLoc)?isAllowedPath(getLnkLoc(absLoc), login):true);
 }
 
@@ -495,11 +471,11 @@ function sendError(req, res, args){
 }
 
 // LNK/redirect handling
-function getLnkLoc(lnkPath, skipValidation){
+function getLNKDestination(lnkPath, skipValidation){
 	// Todo: Replace this with a system I know can't break (Damn variable-length file formats)
-	if (!skipValidation && !isLnkLoc(lnkPath)){
+	if (!skipValidation && !pathIsLNK(lnkPath)){
 		// Gotta love having to avoid stackoverflows
-		warn(`getLnkLoc returned null ("${lnkPath}")`);
+		warn(`getLNKDestination returned null ("${lnkPath}")`);
 		return null;
 	}
 	var lnkContents=fs.readFileSync(lnkPath).toString(),
@@ -509,13 +485,13 @@ function getLnkLoc(lnkPath, skipValidation){
 		// if (!isParentDirOrSelf(loc, config.basePath)){return undefined;} // For some reason this causes problems with getLocFromReq
 		return loc;
 	} catch {
-		warn(`getLnkLoc returned null ("${lnkPath}")`);
+		warn(`getLNKDestination returned null ("${lnkPath}")`);
 		return null;
 	}
 }
-function isLnkLoc(lnkPath){
+function pathIsLNK(lnkPath){
 	// Honestly this comment is just here so sublime witll let me collapse the function
-	return pathIsFile(lnkPath) && path.extname(lnkPath)==".lnk" && getLnkLoc(lnkPath, true);
+	return pathIsFile(lnkPath) && path.extname(lnkPath)==".lnk" && getLNKDestination(lnkPath, true);
 }
 
 // Sizestring for uploading
@@ -547,7 +523,7 @@ function isValidSizeString(sizeStr){
 	}
 }
 
-function validateConfig(config){
+function validateAndProcessConfig(config){
 	// Validate redirects
 	var validViewSettings={
 		"folder":{
@@ -555,6 +531,14 @@ function validateConfig(config){
 			"videoMode": ["link", "embed"]
 		}
 	};
+	function processViewSettings(viewSettings, account){
+		try{
+			viewSettings.folder.imageRegex=new RegExp(viewSettings.folder.imageRegex);
+		} catch {throw new Error((account!==undefined?account+"'s ":"Default ")+"imageRegex is invalid");}
+		try {
+			viewSettings.folder.videoRegex=new RegExp(viewSettings.folder.videoRegex);
+		} catch {throw new Error((account!==undefined?account+"'s ":"Default ")+"videoRegex is invalid");}
+	}
 	try {
 		child_process.spawnSync("where magick");
 		var magickInstalled=true;
@@ -563,6 +547,7 @@ function validateConfig(config){
 	}
 
 	// == PREPROCESSING ==
+	// Account stuff
 	for (let account in config.accounts){
 		let accountData=config.accounts[account];
 		for (let allowElem in accountData.allow){
@@ -571,9 +556,15 @@ function validateConfig(config){
 		for (let denyElem in accountData.deny){
 			accountData.deny[denyElem]=resolvePath(accountData.deny[denyElem], false, config.basePath)
 		}
+		if ("viewSettings" in accountData){processViewSettings(accountData.viewSettings, account);}
 	}
+	// HTTPS stuff
 	if (config.httpPort===undefined){warn("Defaulting httpPort to 80"); config.httpPort=80;}
 	if (config.httpsPort===undefined){warn("Defaulting httpsPort to 443"); config.httpsPort=443;}
+	//config.httpsKey =resolvePath(config.httpsKey , false, path.dirname(kwargs.config));
+	//config.httpsCert=resolvePath(config.httpsCert, false, path.dirname(kwargs.config));
+
+	// Viewsettings stuff
 	try{
 		config.viewSettings.folder.imageRegex=new RegExp(config.viewSettings.folder.imageRegex);
 	} catch {throw new Error("imageRegex is invalid");}
@@ -581,90 +572,8 @@ function validateConfig(config){
 		config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
 	} catch {throw new Error("videoRegex is invalid");}
 
-	// == VALIDATION ==
-	for (let redirect in config.redirects){
-		//if (/^[a-z\d]*:\/[^\/]/i.test(config.redirects[redirect])){
-		//	throw new Error(`Redirect "${redirect}" redirects to invalid path`);
-		//}
-	}
-	// Validate accounts
-	for (let account in config.accounts){
-		let accountData=config.accounts[account];
-		if (accountData.passHash.length!=hash("", config.hashSalt, config.hashType).length){
-			throw new Error(`${account} has an invalid passHash length`);
-		}
-		for (let denyElem of accountData.deny){
-			if (!accountData.allow.some(allowElem=>isParentDirOrSelf(denyElem, allowElem))){
-				warn(`${account} is denied ${denyElem} despite not being allowed any of its parents`);
-			}
-		}
-		if (account==""){
-			if (accountData.canUpload!=false){
-				warn(`Default account has been granted upload permissions`);
-			}
-			if (hash("", config.hashSalt, config.hashType)!=accountData.passHash){
-				warn(`Default account has a non-empty password`);
-			}
-		}
-		if (account!="" && hash("", config.hashSalt, config.hashType)==accountData.passHash){
-			warn(`${account} has an empty password`);
-		}
-		if (typeof accountData.canUpload=="string"){
-			if (!pathExists(accountData.canUpload)){
-				throw new Error(`${account}'s upload path has been set to a nonexistent location`);
-			}
-			if (!pathIsDirectory(accountData.canUpload)){
-				throw new Error(`${account}'s upload path is not a directory`);
-			}
-		}
-		for (let view in validViewSettings){
-			for (let setting in validViewSettings[view]){
-				if (!("viewSettings" in accountData) || !(view in accountData.viewSettings) || !(setting in accountData.viewSettings[view])){
-					continue;
-				}
-				if (view=="folder" && setting=="imageMode" && accountData.viewSettings[view][setting]=="thumbnail" && !magickInstalled){
-					throw new Error(`${account}'s viewSettings.folder.imageMode is set to thumbnail depite imageMagick not being installed`)
-				}
-				if (validViewSettings[view][setting].indexOf(accountData.viewSettings[view][setting])==-1){
-					throw new Error(`${account}'s viewSettings.${view}.${setting} has an invalid value of "${accountData.viewSettings[view][setting]}"`);
-				}
-			}
-		}
-	}
-	for (let view in validViewSettings){
-		for (let setting in validViewSettings[view]){
-			if (validViewSettings[view][setting].indexOf(config.viewSettings[view][setting])==-1){
-				throw new Error(`viewSettings.${view}.${setting} has an invalid value of "${config.viewSettings[view][setting]}"`);
-			}
-			if (view=="folder" && setting=="imageMode" && config.viewSettings[view][setting]=="thumbnail" && !magickInstalled){
-				throw new Error(`viewSettings.${view}.${setting} is set to thumbnail despite imageMagick not being installed`);
-			}
-		}
-	}
-	if (!pathExists(config.defaultUploadLoc)){
-		throw new Error(`Default upload path has been set to a nonexistent location`);
-	}
-	if (!pathIsDirectory(config.defaultUploadLoc)){
-		throw new Error(`Default upload path is not a directory`);
-	}
+	warn("Config validation isn't properly implemented yet because I keep changing stuff");
 
-	// Validate hashSalt
-	if (config.hashSalt.length<8){
-		// Should this be an error?
-		warn(`hashSalt is short (less than 8 characters)`);
-	}
-	// Validate maxFileSize
-	if (!isValidSizeString(config.maxFileSize)){
-		throw new Error(`maxFileSize is set to an invalid value ("${config.maxFileSize}")`);
-	}
-	if (config.useHTTPS){
-		if (!pathExists(config.httpsKey) || !pathIsFile(config.httpsKey)){
-			throw new Error(`Nonexistent/non-file httpsKey provided ("${config.httpsKey}")`);
-		}
-		if (!pathExists(config.httpsCert) || !pathIsFile(config.httpsCert)){
-			throw new Error(`Nonexistent/non-file httpsCert provided ("${config.httpsCert}")`);
-		}
-	}
 	return config;
 }
 function getViewSettingsFromLogin(login){

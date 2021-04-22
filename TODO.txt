@@ -6,3 +6,7 @@ Features
 Technical
 	- Better/more comments
 	- Better config validation
+
+Investigate possible security holes
+	- basePath="C:/a/b/" + loc="//C:/c/" or something
+		- I'm relying too much on loc[1]==":" to check if a path is absolute
