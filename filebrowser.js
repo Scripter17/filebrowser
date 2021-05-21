@@ -24,14 +24,14 @@ parser.add_argument("--log-req",   {help:"Log every request  made by any user", 
 parser.add_argument("--log-res",   {help:"Log every response sent to any user", action :"store_true"});
 kwargs=parser.parse_args();
 
-thumbnailCache={};
-
 // Get the config then move the cwd to the script's directory
 // This used to resolve #1 but that job's been taken by elseViewHandler
 kwargs.config=path.resolve(kwargs.config);
 config=JSON.parse(fs.readFileSync(kwargs.config));
 process.chdir(__dirname);
 config=validateAndProcessConfig(config);
+
+cachedImages=fs.readdirSync(config.cacheDir);
 
 // Handle --hash
 if (kwargs.hash!=undefined){
@@ -194,18 +194,18 @@ server.get("/*", function(req, res){
 	} else {
 		// Send file
 		if ("thumbnail" in req.query && viewSettings.folder.imageRegex.test(loc)){
-			if (loc in thumbnailCache && hash(fs.readFileSync(loc))==thumbnailCache[loc].hash){
+			var imageHash=hash(fs.readFileSync(loc))
+			if (cachedImages.indexOf(imageHash)!=-1){
 				logRes(`Sending pre-existing thumbnail for "${rawLoc}`, login, req);
-				res.sendFile(__dirname+"/cache/"+thumbnailCache[loc].hash+".jpg");
+				res.sendFile(path.resolve(path.join(config.cacheDir, imageHash)));
 				logRes(`Sent pre-existing thumbnail for "${rawLoc}"`, login, req);
 			} else {
 				logRes(`Generating thumbnail for "${rawLoc}"`, login, req);
-				thumbnailCache[loc]={"hash":hash(fs.readFileSync(loc))};
-				cacheFile=fs.createWriteStream(__dirname+"/cache/"+thumbnailCache[loc].hash+".jpg");
+				var cacheFile=fs.createWriteStream(path.join(config.cacheDir, imageHash));
 				res.set("Content-Type", "image/jpeg");
 				let stream=child_process.spawn( // Note to self: var preserves address whereas let doesn't
 					"magick", [loc+"[0]", "-format", "jpeg", "-scale", "512x512>", "-"],
-					{"env":{"MAGICK_DISK_LIMIT":sizeStringToBytes("1GiB")}}
+					{"env":{"MAGICK_DISK_LIMIT": sizeStringToBytes("1GiB")}}
 				);
 				stream.stdout.on("data", function(data){
 					res.write(Buffer.from(data));
@@ -221,6 +221,7 @@ server.get("/*", function(req, res){
 						logRes(`Thumbnail gneration for "${rawLoc}" terminated early`, login, req, startTime);
 					} else {
 						logRes(`Generated thumbnail for "${rawLoc}"`, login, req, startTime);
+						cachedImages.push(imageHash)
 					}
 				});
 			}
