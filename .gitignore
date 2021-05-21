@@ -107,3 +107,4 @@ dist
 debug-*
 *.pem
 files
+cache/*
