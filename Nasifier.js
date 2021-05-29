@@ -13,7 +13,7 @@ child_process=require("child_process");
 
 // Argument parsing
 parser=new argparse.ArgumentParser({
-	description:"FileBrowser CLI",
+	description:"Nasifier CLI",
 	add_help:true
 });
 parser.add_argument("--config",    {help:"Set config file",                     metavar:"config", default:"config.json"});
@@ -372,7 +372,7 @@ function getFolderContents(req){
 function getAtContents(loc, login, processed){
 	// An atfile is a file just called @ in a folder
 	// The lines of an atfile refer to other folder/files relative to it
-	// Filebrowser treats the files and the contents of the folders almost like LNK files
+	// Nasifier treats the files and the contents of the folders almost like LNK files
 	var viewSettings=getViewSettingsFromLogin(login),
 		ret=[];
 	processed||=[];

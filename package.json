@@ -1,8 +1,8 @@
 {
-  "name": "fb2",
+  "name": "Nasifier",
   "version": "1.0.0",
   "description": "",
-  "main": "main.js",
+  "main": "Nasifier.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
