@@ -347,16 +347,21 @@ function formatPathToLink(loc, parent, relative){
 }
 
 function getFolderContents(req){
-	function sortFunction(f1, f2){
-		var parseFileName=x=>[
-				path.basename(x, path.extname(x)).replace(/\d+$/, ""),
-				parseInt((/\d+$/.exec(path.basename(x, path.extname(x)))||["0"])[0]),
-				path.extname(x)
-			],
-			miniSort=(x,y)=>(x>y)-(x<y);
-		if (typeof f1=="string"){f1=parseFileName(f1);}
-		if (typeof f2=="string"){f2=parseFileName(f2);}
-		return miniSort(f1[0], f2[0]) || miniSort(f1[1], f2[1]) || miniSort(f1[2], f2[2]);
+	function sortFunction(x, y){
+		// Unsorted: ["a1","a10","a2","b2","b10a","b1"]
+		// Sorted"   ["a1","a2","a10","b1","b2","b10a"]
+		var xSplit=new Array(...x.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]),
+			ySplit=new Array(...y.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]);
+		for (var i=0; i<Math.min(xSplit.length, ySplit.length); i++){
+			if (xSplit[i]!=ySplit[i]){
+				if (/\d+/.test(xSplit[i]) && /\d+/.test(ySplit[i])){
+					return parseInt(xSplit[i])-parseInt(ySplit[i]);
+				} else {
+					return (xSplit[i]>ySplit[i])-(xSplit[i]<ySplit[i]);
+				}
+			}
+		}
+		return (x>y)-(x<y);
 	}
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req),
