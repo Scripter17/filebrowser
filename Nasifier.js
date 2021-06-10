@@ -347,43 +347,18 @@ function formatPathToLink(loc, parent, relative){
 }
 
 function getFolderContents(req, login){
-	var sorts={
-		"block": function(x, y){
-			// Unsorted: ["a1","a10","a2","b2","b10a","b1"]
-			// Sorted"   ["a1","a2","a10","b1","b2","b10a"]
-			var xSplit=new Array(...x.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]),
-				ySplit=new Array(...y.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]);
-			for (var i=0; i<Math.min(xSplit.length, ySplit.length); i++){
-				if (xSplit[i]!=ySplit[i]){
-					if (/\d+/.test(xSplit[i]) && /\d+/.test(ySplit[i])){
-						return parseInt(xSplit[i])-parseInt(ySplit[i]);
-					} else {
-						return (xSplit[i]>ySplit[i])-(xSplit[i]<ySplit[i]);
-					}
-				}
-			}
-			return (x>y)-(x<y);
-		}
-	}
-	var invSort=function(f){return function(x, y){return f(y, x)};};
-	var sortFunction=(getViewSettingsFromLogin(login).folder.sort||"block").split(":");
-	if (sortFunction[1].toLowerCase()=="inv"){
-		sortFunction=invSort(sorts[sortFunction[0]]);
-	} else {
-		sortFunction=sorts[sortFunction[0]];
-	}
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req),
 		contents=fs.readdirSync(loc).map(content=>resolvePath(content, false, loc))
-			.concat(...(fs.readdirSync(loc).indexOf("@")!=-1?getAtContents(loc, login):[])) // Append atfile contents
+			//.concat(...(fs.readdirSync(loc).indexOf("@")!=-1?getAtContents(loc, login):[])) // Append atfile contents
 			.filter(content=>pathExists(content)) // "C:/System Volume Information" doesn't exist, even though it does
 			.filter(content=>isAllowedPath(content, login)) // Don't let people see the stuff they can't access
 			.filter((content, i, arr)=>arr.indexOf(content)==i), // Don't want any duplicates
-		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true)).sort(sortFunction),
-		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true)).sort(sortFunction);
-	return {files:files, folders:folders};
+		folders=contents.filter(content=>pathIsDirectory(content)).map(content=>formatPathToLink(content, loc, true)),
+		files=contents.filter(content=>pathIsFile(content)).map(content=>formatPathToLink(content, loc, true));
+	return handleDDJ({files:files, folders:folders}, loc, login);
 }
-function getAtContents(loc, login, processed){
+/*function getAtContents(loc, login, processed){
 	// An atfile is a file just called @ in a folder
 	// The lines of an atfile refer to other folder/files relative to it
 	// Nasifier treats the files and the contents of the folders almost like LNK files
@@ -413,6 +388,46 @@ function getAtContents(loc, login, processed){
 		ret.push(line);
 	}
 	return ret;
+}*/
+function handleDDJ(contents, loc, login){
+	//if (contents.files.indexOf("..json")==-1){
+	//	return contents;
+	//}
+	var DDJ=JSON.parse(fs.readFileSync(path.join(loc, "..json")).toString());
+	var viewSettings=immutablyAssignNonObjectsRecursively(getViewSettingsFromLogin(login), DDJ.viewSettings);
+	var sorts={
+		"block": function(x, y){
+			// Unsorted: ["a1","a10","a2","b2","b10a","b1"]
+			// Sorted"   ["a1","a2","a10","b1","b2","b10a"]
+			var xSplit=new Array(...x.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]),
+				ySplit=new Array(...y.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]);
+			for (var i=0; i<Math.min(xSplit.length, ySplit.length); i++){
+				if (xSplit[i]!=ySplit[i]){
+					if (/\d+/.test(xSplit[i]) && /\d+/.test(ySplit[i])){
+						return parseInt(xSplit[i])-parseInt(ySplit[i]);
+					} else {
+						return (xSplit[i]>ySplit[i])-(xSplit[i]<ySplit[i]);
+					}
+				}
+			}
+			return (x>y)-(x<y);
+		}
+	}
+	var invSort=function(f){return function(x, y){return f(y, x)};};
+	function getSortFunction(sortString){
+		var sortFunction=(sortString||"block").split(":");
+		if ((sortFunction[1]||"").toLowerCase()=="inv"){
+			sortFunction=invSort(sorts[sortFunction[0]]);
+		} else {
+			sortFunction=sorts[sortFunction[0]];
+		}
+		return sortFunction;
+	}
+	// a.b?.c returns undefined if b is undefined instead of throwing an error
+	// ?? is || but nullsy (""||0 === 0 && ""??0 === "")
+	contents.folders=contents.folders.sort(getSortFunction(viewSettings.folder.folder?.sort??viewSettings.folder.contents?.sort));
+	contents.files  =contents.files  .sort(getSortFunction(viewSettings.folder.file  ?.sort??viewSettings.folder.contents?.sort));
+	return contents;
 }
 
 // Login/Validation
