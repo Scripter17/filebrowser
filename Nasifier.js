@@ -71,7 +71,7 @@ server.get("/", function(req, res){
 	if (loc!=""){
 		// If the basePath is set, there's no sense is returning driveView
 		res.render("folder", {
-			contents:getFolderContents(req),
+			contents:getFolderContents(req, login),
 			username:login.username, loc:rawLoc,
 			viewSettings:getViewSettingsFromLogin(login),
 			hideBack:true,
@@ -184,7 +184,7 @@ server.get("/*", function(req, res){
 	} else if (pathIsDirectory(loc)){
 		// Send directory view
 		res.render("folder", {
-			contents:getFolderContents(req),
+			contents:getFolderContents(req, login),
 			username:login.username, loc:rawLoc,
 			viewSettings:getViewSettingsFromLogin(login),
 			hideBack:false,
@@ -346,22 +346,31 @@ function formatPathToLink(loc, parent, relative){
 	return loc;
 }
 
-function getFolderContents(req){
-	function sortFunction(x, y){
-		// Unsorted: ["a1","a10","a2","b2","b10a","b1"]
-		// Sorted"   ["a1","a2","a10","b1","b2","b10a"]
-		var xSplit=new Array(...x.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]),
-			ySplit=new Array(...y.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]);
-		for (var i=0; i<Math.min(xSplit.length, ySplit.length); i++){
-			if (xSplit[i]!=ySplit[i]){
-				if (/\d+/.test(xSplit[i]) && /\d+/.test(ySplit[i])){
-					return parseInt(xSplit[i])-parseInt(ySplit[i]);
-				} else {
-					return (xSplit[i]>ySplit[i])-(xSplit[i]<ySplit[i]);
+function getFolderContents(req, login){
+	var sorts={
+		"block": function(x, y){
+			// Unsorted: ["a1","a10","a2","b2","b10a","b1"]
+			// Sorted"   ["a1","a2","a10","b1","b2","b10a"]
+			var xSplit=new Array(...x.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]),
+				ySplit=new Array(...y.matchAll(/[^\d]+|\d+/g)).map(z=>z[0]);
+			for (var i=0; i<Math.min(xSplit.length, ySplit.length); i++){
+				if (xSplit[i]!=ySplit[i]){
+					if (/\d+/.test(xSplit[i]) && /\d+/.test(ySplit[i])){
+						return parseInt(xSplit[i])-parseInt(ySplit[i]);
+					} else {
+						return (xSplit[i]>ySplit[i])-(xSplit[i]<ySplit[i]);
+					}
 				}
 			}
+			return (x>y)-(x<y);
 		}
-		return (x>y)-(x<y);
+	}
+	var invSort=function(f){return function(x, y){return f(y, x)};};
+	var sortFunction=(getViewSettingsFromLogin(login).folder.sort||"block").split(":");
+	if (sortFunction[1].toLowerCase()=="inv"){
+		sortFunction=invSort(sorts[sortFunction[0]]);
+	} else {
+		sortFunction=sorts[sortFunction[0]];
 	}
 	var login=getLoginFromReq(req),
 		loc=getLocFromReq(req),
@@ -593,19 +602,18 @@ function validateAndProcessConfig(config){
 	} catch {throw new Error("videoRegex is invalid");}
 
 	warn("Config validation isn't properly implemented yet because I keep changing stuff");
-
 	return config;
 }
 function getViewSettingsFromLogin(login){
 	// Annoyingly lone lines of code get sentenced to isolation
 	if (!(login.username in config.accounts) || !("viewSettings" in config.accounts[login.username])){return config.viewSettings;}
-	return assignNonObjectsRecursivelyImmutable(config.viewSettings, config.accounts[login.username].viewSettings);
+	return immutablyAssignNonObjectsRecursively(config.viewSettings, config.accounts[login.username].viewSettings);
 }
-function assignNonObjectsRecursivelyImmutable(baseObject, overwriteObject){
+function immutablyAssignNonObjectsRecursively(baseObject, overwriteObject){
 	var retObj={...baseObject}
 	for (var i in overwriteObject){
-		if (typeof retObj[i]=="object"){
-			retObj[i]=assignNonObjectsRecursivelyImmutable(retObj[i], overwriteObject[i]);
+		if (typeof retObj[i]=="object" && !(retObj[i] instanceof RegExp)){
+			retObj[i]=immutablyAssignNonObjectsRecursively(retObj[i], overwriteObject[i]);
 		} else {
 			retObj[i]=overwriteObject[i];
 		}
