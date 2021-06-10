@@ -167,7 +167,6 @@ server.get("/*", function(req, res){
 		viewSettings=getViewSettingsFromLogin(login);
 	logReq(`Requested "${rawLoc}${"thumbnail" in req.query?"?thumbnail":""}"`, login, req);
 	res.setHeader("Permissions-Policy", "interest-cohort=()");
-	console.log(loc, rawLoc)
 	if (((config.basePath!="")==(rawLoc[1]==":") && !(rawLoc in config.redirects)) || !isAllowedPath(loc, login)){
 		// Login invalid; Return 403
 		// Jank ass if statement
@@ -393,8 +392,6 @@ function handleDDJ(contents, loc, login){
 	//if (contents.files.indexOf("..json")==-1){
 	//	return contents;
 	//}
-	var DDJ=JSON.parse(fs.readFileSync(path.join(loc, "..json")).toString());
-	var viewSettings=immutablyAssignNonObjectsRecursively(getViewSettingsFromLogin(login), DDJ.viewSettings);
 	var sorts={
 		"block": function(x, y){
 			// Unsorted: ["a1","a10","a2","b2","b10a","b1"]
@@ -422,6 +419,12 @@ function handleDDJ(contents, loc, login){
 			sortFunction=sorts[sortFunction[0]];
 		}
 		return sortFunction;
+	}
+	var viewSettings=getViewSettingsFromLogin(login);
+	if (pathIsFile(path.join(loc, "..json"))){
+		var DDJ=JSON.parse(fs.readFileSync(path.join(loc, "..json")).toString());
+		var viewSettings=immutablyAssignNonObjectsRecursively(viewSettings, DDJ.viewSettings);
+	} else {
 	}
 	// a.b?.c returns undefined if b is undefined instead of throwing an error
 	// ?? is || but nullsy (""||0 === 0 && ""??0 === "")
