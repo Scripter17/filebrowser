@@ -8,6 +8,7 @@ path=require("path");
 fs=require("fs");
 crypto=require("crypto");
 child_process=require("child_process");
+minimatch=require("minimatch");
 
 // == INITIALIZATION ==
 
@@ -424,13 +425,37 @@ function handleDDJ(contents, loc, login){
 	if (pathIsFile(path.join(loc, "..json"))){
 		var DDJ=JSON.parse(fs.readFileSync(path.join(loc, "..json")).toString());
 		var viewSettings=immutablyAssignNonObjectsRecursively(viewSettings, DDJ.viewSettings);
-	} else {
 	}
+	importContents=handleDDJImports(loc, login)
+	contents.folders.push(...importContents.filter(x=>pathIsDirectory(x)));
+	contents.files  .push(...importContents.filter(x=>pathIsFile(x)));
 	// a.b?.c returns undefined if b is undefined instead of throwing an error
 	// ?? is || but nullsy (""||0 === 0 && ""??0 === "")
 	contents.folders=contents.folders.sort(getSortFunction(viewSettings.folder.folder?.sort??viewSettings.folder.contents?.sort));
 	contents.files  =contents.files  .sort(getSortFunction(viewSettings.folder.file  ?.sort??viewSettings.folder.contents?.sort));
 	return contents;
+}
+function handleDDJImports(loc, login, processed){
+	var ret=[];
+	processed||=[];
+	if (processed.indexOf(loc)!=-1){
+		return ret;
+	} else {
+		processed.push(loc);
+	}
+	if (!pathIsFile(resolvePath("..json", false, loc))){
+		return ret;
+	}
+	var ddjImports=JSON.parse(fs.readFileSync(resolvePath("..json", false, loc)).toString()).imports||[];
+	for (var ddjImport of ddjImports){
+		ddjImport=resolvePath(ddjImport, false, loc);
+		if (pathIsDirectory(ddjImport)){
+			ret.push(...fs.readdirSync(ddjImport).map(x=>resolvePath(x, false, ddjImport)));
+			ret.push(...getAtContents(ddjImport, login, processed));
+		}
+		ret.push(ddjImport);
+	}
+	return ret;
 }
 
 // Login/Validation
@@ -480,6 +505,8 @@ function isAllowedPath(loc, login){
 			// Note to self: resolvePath("") gives a wrong answer (probably should fix that)
 			if (isParentDirOrSelf(absLoc, allowElem) && allowElem.endsWith("/")!=pathIsDirectory(allowElem)){warn(`PathDir mismatch in isAllowedPath._isAllowed (${allowElem})`); return false;}
 			return isParentDirOrSelf(absLoc, allowElem&&resolvePath(allowElem)) || isParentDirOrSelf(allowElem&&resolvePath(allowElem), absLoc);
+		}) || (config.accounts[login.username].allowGlob??[]).some(function(allowGlobElem){
+			return minimatch(absLoc, allowGlobElem, {dot:true}); // Why the fuck isn't dot=true the default
 		});
 	}
 	function _isDenied(absLoc, login){
@@ -487,6 +514,8 @@ function isAllowedPath(loc, login){
 			//denyElem=resolvePath(denyElem, false, true);
 			if (isParentDirOrSelf(absLoc, denyElem) && denyElem.endsWith("/")!=pathIsDirectory(denyElem)){warn(`PathDir mismatch in isAllowedPath._isDenied (${denyElem})`); return true;}
 			return isParentDirOrSelf(absLoc, resolvePath(denyElem));
+		}) || (config.accounts[login.username].denyGlob??[]).some(function(denyGlobElem){
+			return minimatch(absLoc, denyGlobElem, {dot:true});
 		});
 	}
 	if (loc in config.redirects){return isAllowedPath(config.redirects[loc], login) && !_isDenied(loc, login);}
@@ -580,10 +609,14 @@ function validateAndProcessConfig(config){
 	};
 	function processViewSettings(viewSettings, account){
 		try{
-			viewSettings.folder.imageRegex=new RegExp(viewSettings.folder.imageRegex);
+			if ("imageRegex" in viewSettings.folder){
+				viewSettings.folder.imageRegex=new RegExp(viewSettings.folder.imageRegex);
+			}
 		} catch {throw new Error((account!==undefined?account+"'s ":"Default ")+"imageRegex is invalid");}
 		try {
-			viewSettings.folder.videoRegex=new RegExp(viewSettings.folder.videoRegex);
+			if ("videoRegex" in viewSettings.folder){
+				viewSettings.folder.videoRegex=new RegExp(viewSettings.folder.videoRegex);
+			}
 		} catch {throw new Error((account!==undefined?account+"'s ":"Default ")+"videoRegex is invalid");}
 	}
 	try {
@@ -618,7 +651,6 @@ function validateAndProcessConfig(config){
 	try {
 		config.viewSettings.folder.videoRegex=new RegExp(config.viewSettings.folder.videoRegex);
 	} catch {throw new Error("videoRegex is invalid");}
-
 	warn("Config validation isn't properly implemented yet because I keep changing stuff");
 	return config;
 }

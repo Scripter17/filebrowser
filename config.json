@@ -4,7 +4,9 @@
 		"admin": {
 			"passHash": "",
 			"allow": [],
+			"allowGlob":[],
 			"deny": [],
+			"denyGlob":[],
 			"canUpload": false,
 			"viewSettings": {
 				"folder": {
@@ -20,8 +22,7 @@
 			"imageRegex": "\\.(a?png|j(pe?g|fif)|gif|bmp)$",
 			"videoMode": "link",
 			"videoRegex": "\\.(mp4|mov|webm|mkv)$",
-			"handleLNKFiles": true,
-			"handleAtFiles": true
+			"handleLNKFiles": true
 		}
 	},
 	"defaultUploadLoc": "./files",
