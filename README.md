@@ -30,6 +30,8 @@ optional arguments:
 
 ## Config.json
 
+# This is outdated and needs to be rewritten
+
 Before you can properly use Nasifier, you need to set up config.json. This manages all accounts, what they can/can't access, and whether or not they can upload files
 
 ### Initial Config.json

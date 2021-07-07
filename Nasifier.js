@@ -229,7 +229,7 @@ server.get("/*", function(req, res){
 			res.redirect("/"+clipBasePath(getLNKDestination(loc)));
 			logRes(`Redirected to "${clipBasePath(getLNKDestination(loc))}" via LNK file`, login, req, startTime);
 		} else {
-			res.sendFile(loc, path.extname(loc)===""?{headers:{"Content-Type":"text"}}:{});
+			res.sendFile(loc, Object.assign({"dotfiles":"allow"}, path.extname(loc)==""?{headers:{"Content-Type":"text"}}:{}));
 			logRes(`Sent file "${rawLoc}"`, login, req, startTime);
 		}
 	}
@@ -409,15 +409,25 @@ function handleDDJ(contents, loc, login){
 				}
 			}
 			return (x>y)-(x<y);
+		},
+		"ascii":function(x, y){
+			return (x>y)-(x<y);
 		}
-	}
-	var invSort=function(f){return function(x, y){return f(y, x)};};
+	};
+	var filters={
+		"inv":function(f){return function(x, y){return f(y, x)};},
+		"nocase":function(f){return function(x, y){return f(x.toLowerCase(), y.toLowerCase())};}
+	};
 	function getSortFunction(sortString){
-		var sortFunction=(sortString||"block").split(":");
-		if ((sortFunction[1]||"").toLowerCase()=="inv"){
+		var sortArray=(sortString||"block").split(":");
+		/*if ((sortFunction[1]||"").toLowerCase()=="inv"){
 			sortFunction=invSort(sorts[sortFunction[0]]);
 		} else {
 			sortFunction=sorts[sortFunction[0]];
+		}*/
+		sortFunction=sorts[sortArray[0]];
+		for (var i=1; i<sortArray.length; i++){
+			sortFunction=filters[sortArray[i]](sortFunction);
 		}
 		return sortFunction;
 	}
@@ -431,8 +441,8 @@ function handleDDJ(contents, loc, login){
 	contents.files  .push(...importContents.filter(x=>pathIsFile(x)));
 	// a.b?.c returns undefined if b is undefined instead of throwing an error
 	// ?? is || but nullsy (""||0 === 0 && ""??0 === "")
-	contents.folders=contents.folders.sort(getSortFunction(viewSettings.folder.folder?.sort??viewSettings.folder.contents?.sort));
-	contents.files  =contents.files  .sort(getSortFunction(viewSettings.folder.file  ?.sort??viewSettings.folder.contents?.sort));
+	contents.folders=contents.folders.sort(getSortFunction(viewSettings.folder.folder?.sort??viewSettings.folder?.sort));
+	contents.files  =contents.files  .sort(getSortFunction(viewSettings.folder.file  ?.sort??viewSettings.folder?.sort));
 	return contents;
 }
 function handleDDJImports(loc, login, processed){
